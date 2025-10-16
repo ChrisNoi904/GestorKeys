@@ -236,7 +236,7 @@ def index():
                 # Si se solicitó guardar el cliente
                 if request.form.get('guardar_cliente'):
                     if save_client_to_db(consulta_cuit, razon_social):
-                        flash(f"Cliente {razon_social} ({consulta_cuit}) guardado exitosamente.", 'success')
+                        flash(f"Cliente {razon_social} ({cuit_consulta}) guardado exitosamente.", 'success')
                     else:
                         flash(f"El cliente {cuit_consulta} ya estaba registrado.", 'info')
                 
@@ -334,6 +334,11 @@ def gestion_certificados():
                     cert_content = cert_file.read()
                     key_content = key_file.read()
                     
+                    # --- PUNTO DE CONTROL 1: ENTRADA DE ARCHIVOS ---
+                    app.logger.info(f"--- INICIO POST CERTIFICADOS ---")
+                    app.logger.info(f"Nombre Cert: {cert_file.filename} | Tamaño: {len(cert_content)} bytes")
+                    app.logger.info(f"Nombre Key: {key_file.filename} | Tamaño: {len(key_content)} bytes")
+                    
                     # 1. Validar y obtener vencimiento (LÓGICA CON OpenSSL)
                     try:
                         # Escribir el certificado a un archivo temporal para OpenSSL
@@ -357,8 +362,13 @@ def gestion_certificados():
                         
                         # Convertir a objeto date de Python
                         vencimiento = datetime.datetime.strptime(vencimiento_str, '%b %d %H:%M:%S %Y GMT').date()
+
+                        # --- PUNTO DE CONTROL 2: VENCIMIENTO OBTENIDO ---
+                        app.logger.info(f"Vencimiento extraído por OpenSSL: {vencimiento}")
                         
                     except Exception as e:
+                        # --- PUNTO DE CONTROL DE FALLO ---
+                        app.logger.error(f"FALLO DE OPENSSL: Error al leer/validar certificado: {e}")
                         flash(f"Error al leer/validar el certificado (.crt). Asegúrese que sea un certificado X.509 válido en formato PEM y sin cifrar: {e}", 'error')
                         return redirect(url_for('gestion_certificados'))
                     finally:
@@ -370,16 +380,27 @@ def gestion_certificados():
 
                     # 2. Desactivar todos los certificados anteriores e insertar el nuevo
                     with conn.cursor() as cursor:
+                        # Desactivación
                         cursor.execute("UPDATE certificados SET activo = 0")
+                        # --- PUNTO DE CONTROL 3: DESACTIVACIÓN ---
+                        app.logger.info("Todos los certificados anteriores han sido desactivados.")
                         
+                        # Inserción
                         sql = "INSERT INTO certificados (fecha_alta, fecha_vencimiento, nombre_archivo, cert_content, key_content, activo) VALUES (%s, %s, %s, %s, %s, 1)"
                         cursor.execute(sql, (datetime.datetime.now(), vencimiento, cert_file.filename, cert_content, key_content))
+                        new_id = cursor.lastrowid
                         conn.commit()
+
+                        # --- PUNTO DE CONTROL 4: INSERCIÓN EXITOSA ---
+                        app.logger.info(f"Certificado insertado exitosamente con ID: {new_id} y Vencimiento: {vencimiento}")
                         flash(f"Certificado {cert_file.filename} cargado y activado. Vence el {vencimiento}.", 'success')
                     
+                    # --- PUNTO DE CONTROL 5: REDIRECCIÓN ---
+                    app.logger.info("--- FIN POST CERTIFICADOS: Redirigiendo a GET /gestion_certificados ---")
                     return redirect(url_for('gestion_certificados'))
 
             elif 'delete_id' in request.form:
+                # ... (Lógica de eliminación)
                 cert_id = request.form['delete_id']
                 with conn.cursor() as cursor:
                     cursor.execute("DELETE FROM certificados WHERE id = %s", (cert_id,))
@@ -392,28 +413,23 @@ def gestion_certificados():
         
         try:
             with conn.cursor() as cursor:
-                # 1. Traer datos
                 cursor.execute("SELECT id, fecha_alta, fecha_vencimiento, nombre_archivo, activo FROM certificados ORDER BY fecha_vencimiento DESC")
                 raw_certificados = cursor.fetchall()
                 
-                # 2. CONVERTIR FECHAS A STRING (SOLUCIÓN AL ERROR 500 DE SERIALIZACIÓN)
+                # CONVERSIÓN DE FECHAS A STRING (para evitar error de serialización en Jinja2)
                 for cert in raw_certificados:
                     if cert['fecha_alta']:
-                         # Convertir objeto datetime a string legible
                         cert['fecha_alta'] = cert['fecha_alta'].strftime('%Y-%m-%d %H:%M:%S')
                     if cert['fecha_vencimiento']:
-                        # Convertir objeto date a string legible
                         cert['fecha_vencimiento'] = cert['fecha_vencimiento'].strftime('%Y-%m-%d')
                     
                     certificados.append(cert)
             
         except Exception as e:
-            # Si la lectura falla por cualquier razón, lo logeamos y devolvemos lista vacía
             app.logger.error(f"Error al obtener historial de certificados (GET): {e}")
             flash("Error al cargar el historial. Consulte los logs de Render para detalles.", 'error')
             
     except Exception as e:
-        # Error general que atrapa cualquier cosa no capturada arriba
         flash(f"Error general en la gestión de certificados: {e}", 'error')
     finally:
         # Limpieza final y cierre de conexión
@@ -426,6 +442,7 @@ def gestion_certificados():
 # =================================================================
 #                         FUNCIONES CRUD/AUXILIARES
 # =================================================================
+# ... (Funciones auxiliares sin cambios) ...
 
 def save_client_to_db(cuit, razon_social):
     """Guarda un cliente en la tabla clientes_afip si no existe."""
