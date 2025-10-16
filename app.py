@@ -9,11 +9,14 @@ import base64
 import pymysql.cursors 
 from xml.etree import ElementTree as ET
 
-# Librerías necesarias para la migración
+# Librerías necesarias para la migración y web
 from flask import Flask, render_template, request, redirect, url_for, flash
 from zeep import Client
 from zeep.transports import Transport
 from openpyxl import load_workbook
+# Importar pytz (necesario para manejar zonas horarias, aunque usaremos .utcnow() por simplicidad)
+# Si usa Python 3.9+ puede usar datetime.timezone.utc
+# import pytz 
 
 # =================================================================
 #                         CONFIGURACIÓN Y GLOBALES
@@ -133,9 +136,10 @@ def consultar_cuit_afip(cuit_consultado_str):
             tmp_key.close()
 
             # --- 1. CREAR LoginTicketRequest ---
-            ahora = datetime.datetime.now()
-            generation_time = (ahora - datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
-            expiration_time = (ahora + datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
+            # 💡 CORRECCIÓN CRÍTICA: Usar UTC para evitar el error de generationTime
+            ahora_utc = datetime.datetime.utcnow() 
+            generation_time = (ahora_utc - datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
+            expiration_time = (ahora_utc + datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
 
             login_ticket = f"""<?xml version="1.0" encoding="UTF-8"?>
 <loginTicketRequest version="1.0">
@@ -162,6 +166,8 @@ def consultar_cuit_afip(cuit_consultado_str):
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                 cms_der = pathlib.Path(tmp_cms_der_path).read_bytes()
+                # La salida de OpenSSL base64 puede incluir saltos de línea que rompían la solicitud.
+                # Se utiliza el input para garantizar la entrada correcta.
                 cms_b64 = subprocess.check_output([OPENSSL_BIN, 'base64'], input=cms_der).decode().strip()
                 
                 # --- 3. AUTENTICAR EN WSAA ---
@@ -191,15 +197,21 @@ def consultar_cuit_afip(cuit_consultado_str):
                 return persona, nombre_capturado
 
             except subprocess.CalledProcessError as e:
+                app.logger.error(f"Error de OpenSSL al firmar: {e}")
                 return None, f"Error de OpenSSL al firmar: {e}"
             except Exception as e:
+                app.logger.error(f"Error en la consulta AFIP: {e}")
                 return None, f"Error en la consulta AFIP: {e}"
 
     finally:
         # Eliminar archivos temporales de forma segura
         for path in [tmp_cert_path, tmp_key_path, tmp_lt_path, tmp_cms_der_path]:
             if path and os.path.exists(path):
-                os.unlink(path)
+                try:
+                    os.unlink(path)
+                except OSError as e:
+                    # Esto puede ocurrir si el archivo ya fue eliminado o hay permisos
+                    app.logger.warning(f"No se pudo eliminar el archivo temporal {path}: {e}")
 
 # =================================================================
 #                         RUTAS FLASK
@@ -215,7 +227,7 @@ def index():
     # Verificar si el certificado está activo para mostrar el mensaje
     cert_content, _ = obtener_certificados_activos()
     if not cert_content:
-         flash("Advertencia: No hay certificado AFIP activo. No se podrán realizar consultas al padrón.", 'warning')
+        flash("Advertencia: No hay certificado AFIP activo. No se podrán realizar consultas al padrón.", 'warning')
 
     if request.method == 'POST':
         if 'cuit_consulta' in request.form:
@@ -227,9 +239,22 @@ def index():
             if mensaje_error and persona_data is None:
                 error_message = mensaje_error
             else:
+                # El servicio devuelve una respuesta, aunque puede ser solo una nota de error dentro de la estructura SOAP
                 consulta_cuit = cuit_consulta
-                razon_social = persona_data.datosGenerales.razonSocial
                 
+                # Intentar obtener la razón social de forma segura (puede ser None si hay un error suave)
+                dg = getattr(persona_data, 'datosGenerales', None)
+                if dg:
+                    razon_social = getattr(dg, 'razonSocial', None)
+                
+                if not dg or not razon_social:
+                     # Caso donde CUIT no existe o error en los datos
+                    error_message = mensaje_error or f"El CUIT {cuit_consulta} no devolvió datos generales."
+                    
+                    return render_template('index.html',
+                                        cuit_consultado=consulta_cuit,
+                                        error_message=error_message)
+
                 # Pre-formatear el resultado para la web
                 resultado_html = format_afip_result_html(persona_data, consulta_cuit)
                 
@@ -241,16 +266,16 @@ def index():
                         flash(f"El cliente {cuit_consulta} ya estaba registrado.", 'info')
                 
                 return render_template('index.html', 
-                                       resultado_html=resultado_html, 
-                                       cuit_consultado=consulta_cuit,
-                                       razon_social=razon_social)
+                                        resultado_html=resultado_html, 
+                                        cuit_consultado=consulta_cuit,
+                                        razon_social=razon_social)
         
         elif 'carga_inicial' in request.form:
             # Carga Inicial de Excel (opcional y solo para migrar datos)
             if load_data_from_excel():
                 flash("Datos de clientes y claves migrados correctamente a la DB.", 'success')
             else:
-                flash("Error al migrar datos de Excel. ¿Existen los archivos?", 'error')
+                flash("Error al migrar datos de Excel. ¿Existe el archivo 'claves.xlsx'?", 'error')
             
             return redirect(url_for('index'))
 
@@ -261,7 +286,9 @@ def index():
 @app.route('/gestion_claves/<cuit>', methods=['GET', 'POST'])
 def gestion_claves(cuit=None):
     conn = get_db_connection()
-    if not conn: return redirect(url_for('index'))
+    if not conn: 
+        flash("Error crítico de conexión a la base de datos.", 'error')
+        return redirect(url_for('index'))
 
     clientes = []
     claves = []
@@ -305,6 +332,7 @@ def gestion_claves(cuit=None):
                     flash("Clave eliminada.", 'success')
                 
                 conn.commit()
+                # Redirigir para evitar que el POST se ejecute de nuevo al recargar
                 return redirect(url_for('gestion_claves', cuit=cuit))
 
     except Exception as e:
@@ -334,10 +362,7 @@ def gestion_certificados():
                     cert_content = cert_file.read()
                     key_content = key_file.read()
                     
-                    # --- PUNTO DE CONTROL 1: ENTRADA DE ARCHIVOS ---
                     app.logger.info(f"--- INICIO POST CERTIFICADOS ---")
-                    app.logger.info(f"Nombre Cert: {cert_file.filename} | Tamaño: {len(cert_content)} bytes")
-                    app.logger.info(f"Nombre Key: {key_file.filename} | Tamaño: {len(key_content)} bytes")
                     
                     # 1. Validar y obtener vencimiento (LÓGICA CON OpenSSL)
                     try:
@@ -363,11 +388,9 @@ def gestion_certificados():
                         # Convertir a objeto date de Python
                         vencimiento = datetime.datetime.strptime(vencimiento_str, '%b %d %H:%M:%S %Y GMT').date()
 
-                        # --- PUNTO DE CONTROL 2: VENCIMIENTO OBTENIDO ---
                         app.logger.info(f"Vencimiento extraído por OpenSSL: {vencimiento}")
                         
                     except Exception as e:
-                        # --- PUNTO DE CONTROL DE FALLO ---
                         app.logger.error(f"FALLO DE OPENSSL: Error al leer/validar certificado: {e}")
                         flash(f"Error al leer/validar el certificado (.crt). Asegúrese que sea un certificado X.509 válido en formato PEM y sin cifrar: {e}", 'error')
                         return redirect(url_for('gestion_certificados'))
@@ -382,7 +405,6 @@ def gestion_certificados():
                     with conn.cursor() as cursor:
                         # Desactivación
                         cursor.execute("UPDATE certificados SET activo = 0")
-                        # --- PUNTO DE CONTROL 3: DESACTIVACIÓN ---
                         app.logger.info("Todos los certificados anteriores han sido desactivados.")
                         
                         # Inserción
@@ -391,16 +413,12 @@ def gestion_certificados():
                         new_id = cursor.lastrowid
                         conn.commit()
 
-                        # --- PUNTO DE CONTROL 4: INSERCIÓN EXITOSA ---
                         app.logger.info(f"Certificado insertado exitosamente con ID: {new_id} y Vencimiento: {vencimiento}")
                         flash(f"Certificado {cert_file.filename} cargado y activado. Vence el {vencimiento}.", 'success')
                     
-                    # --- PUNTO DE CONTROL 5: REDIRECCIÓN ---
-                    app.logger.info("--- FIN POST CERTIFICADOS: Redirigiendo a GET /gestion_certificados ---")
                     return redirect(url_for('gestion_certificados'))
 
             elif 'delete_id' in request.form:
-                # ... (Lógica de eliminación)
                 cert_id = request.form['delete_id']
                 with conn.cursor() as cursor:
                     cursor.execute("DELETE FROM certificados WHERE id = %s", (cert_id,))
@@ -416,7 +434,7 @@ def gestion_certificados():
                 cursor.execute("SELECT id, fecha_alta, fecha_vencimiento, nombre_archivo, activo FROM certificados ORDER BY fecha_vencimiento DESC")
                 raw_certificados = cursor.fetchall()
                 
-                # CONVERSIÓN DE FECHAS A STRING (para evitar error de serialización en Jinja2)
+                # CONVERSIÓN DE FECHAS A STRING (para Jinja2)
                 for cert in raw_certificados:
                     if cert['fecha_alta']:
                         cert['fecha_alta'] = cert['fecha_alta'].strftime('%Y-%m-%d %H:%M:%S')
@@ -442,7 +460,6 @@ def gestion_certificados():
 # =================================================================
 #                         FUNCIONES CRUD/AUXILIARES
 # =================================================================
-# ... (Funciones auxiliares sin cambios) ...
 
 def save_client_to_db(cuit, razon_social):
     """Guarda un cliente en la tabla clientes_afip si no existe."""
@@ -476,7 +493,8 @@ def load_data_from_excel():
     conn = None
     try:
         wb = load_workbook(CLAVES_FILE)
-        ws = wb["Hoja1"]
+        ws = wb.active # Asume la primera hoja
+        
         headers = [str(cell.value).lower().strip() if cell.value is not None else '' for cell in ws[1]]
         
         required_fields = ['cuit', 'descripcion_clave', 'usuario', 'clave']
@@ -487,6 +505,12 @@ def load_data_from_excel():
         desc_idx = headers.index('descripcion_clave')
         user_idx = headers.index('usuario')
         clave_idx = headers.index('clave')
+        
+        # Intentar encontrar 'razon_social' si existe, sino usar un placeholder
+        try:
+             razon_social_idx = headers.index('razon_social')
+        except ValueError:
+             razon_social_idx = -1
 
         conn = get_db_connection()
         if not conn: return False
@@ -495,19 +519,24 @@ def load_data_from_excel():
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if row and len(row) > max(cuit_idx, desc_idx, user_idx, clave_idx):
                     cuit = str(row[cuit_idx]).strip().replace('-', '').replace(' ', '')
-                    razon_social = "Desconocida (Desde Excel)" # Se puede mejorar si se usa otro archivo
+                    
+                    if razon_social_idx != -1 and row[razon_social_idx]:
+                        razon_social = str(row[razon_social_idx]).strip()
+                    else:
+                        razon_social = "Desconocida (Desde Excel)" 
                     
                     if cuit.isdigit() and len(cuit) >= 10:
                         # 1. Insertar Cliente (ignorar duplicados)
                         try:
+                            # ON DUPLICATE KEY UPDATE o INSERT IGNORE (depende de la configuración de la tabla)
                             cursor.execute("INSERT IGNORE INTO clientes_afip (cuit, razon_social) VALUES (%s, %s)", (cuit, razon_social))
                         except Exception:
                             pass # Ignoramos si ya existe
 
                         # 2. Insertar Clave
-                        desc = str(row[desc_idx]).strip()
-                        user = str(row[user_idx]).strip()
-                        pw = str(row[clave_idx]).strip()
+                        desc = str(row[desc_idx] or "").strip()
+                        user = str(row[user_idx] or "").strip()
+                        pw = str(row[clave_idx] or "").strip()
                         
                         sql = "INSERT INTO claves (cuit, descripcion_clave, usuario, clave) VALUES (%s, %s, %s, %s)"
                         cursor.execute(sql, (cuit, desc, user, pw))
@@ -527,18 +556,42 @@ def format_afip_result_html(persona, cuit):
     
     html = f"<h2>Resultado de la Consulta AFIP (CUIT: {cuit})</h2>"
     
-    dg = persona.datosGenerales
+    dg = getattr(persona, 'datosGenerales', None)
+    
+    if not dg:
+        return f"<p class='text-danger'>Error: No se obtuvieron datos generales para el CUIT {cuit}.</p>"
+
     nombre_capturado = getattr(dg, 'razonSocial', "") or f"{getattr(dg, 'nombre', '')} {getattr(dg, 'apellido', '')}".strip()
 
     html += f"<h3>Datos Generales</h3>"
     html += f"<p><strong>Razón Social/Nombre:</strong> {nombre_capturado or '—'}</p>"
-    html += f"<p><strong>Estado Clave:</strong> {dg.estadoClave}</p>"
-    dom = dg.domicilioFiscal
-    html += f"<p><strong>Domicilio Fiscal:</strong> {dom.direccion} | {dom.localidad} | {dom.descripcionProvincia} | CP: {dom.codPostal}</p>"
+    html += f"<p><strong>Tipo Persona:</strong> {getattr(dg, 'tipoPersona', '—')}</p>"
+    html += f"<p><strong>Estado Clave:</strong> {getattr(dg, 'estadoClave', '—')}</p>"
     
+    dom = getattr(dg, 'domicilioFiscal', None)
+    if dom:
+        html += f"<h3>Domicilio Fiscal</h3>"
+        html += f"<p><strong>Dirección:</strong> {getattr(dom, 'direccion', '—')}</p>"
+        html += f"<p><strong>Localidad/Provincia:</strong> {getattr(dom, 'localidad', '—')} | {getattr(dom, 'descripcionProvincia', '—')}</p>"
+        html += f"<p><strong>CP:</strong> {getattr(dom, 'codPostal', '—')}</p>"
+        
+    actividades = getattr(persona, 'actividades', None)
+    if actividades and getattr(actividades, 'actividad', []):
+        html += f"<h3>Actividades</h3>"
+        for act in actividades.actividad:
+            principal = ' (Principal)' if getattr(act, 'periodo', '') else ''
+            html += f"<p>- Código {getattr(act, 'idActividad', '—')}: {getattr(act, 'descripcionActividad', '—')}{principal}</p>"
+    
+    impuestos = getattr(persona, 'impuestos', None)
+    if impuestos and getattr(impuestos, 'impuesto', []):
+        html += f"<h3>Impuestos</h3>"
+        for imp in impuestos.impuesto:
+            html += f"<p>- Código {getattr(imp, 'idImpuesto', '—')}: {getattr(imp, 'descripcionImpuesto', '—')}</p>"
+
     return html
 
 if __name__ == '__main__':
     # Usar un puerto dinámico en Render
     port = int(os.environ.get('PORT', 5000))
+    # Asegúrate de que 'templates' y 'static' existan si vas a usar un servidor real
     app.run(host='0.0.0.0', port=port, debug=True)
