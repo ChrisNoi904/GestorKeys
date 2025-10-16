@@ -14,9 +14,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 from zeep import Client
 from zeep.transports import Transport
 from openpyxl import load_workbook
-# Importar pytz (necesario para manejar zonas horarias, aunque usaremos .utcnow() por simplicidad)
-# Si usa Python 3.9+ puede usar datetime.timezone.utc
-# import pytz 
+# Ya no es necesario importar pytz si usamos .utcnow()
 
 # =================================================================
 #                         CONFIGURACIÓN Y GLOBALES
@@ -136,8 +134,10 @@ def consultar_cuit_afip(cuit_consultado_str):
             tmp_key.close()
 
             # --- 1. CREAR LoginTicketRequest ---
-            # 💡 CORRECCIÓN CRÍTICA: Usar UTC para evitar el error de generationTime
+            # ✅ SOLUCIÓN AL ERROR: Usar UTC para evitar el error de generationTime 
+            # (la AFIP usa UTC y el servidor local usa hora local)
             ahora_utc = datetime.datetime.utcnow() 
+            # Se permite una antigüedad máxima de 24hs, 10 minutos es un margen seguro.
             generation_time = (ahora_utc - datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
             expiration_time = (ahora_utc + datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -166,8 +166,6 @@ def consultar_cuit_afip(cuit_consultado_str):
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                 cms_der = pathlib.Path(tmp_cms_der_path).read_bytes()
-                # La salida de OpenSSL base64 puede incluir saltos de línea que rompían la solicitud.
-                # Se utiliza el input para garantizar la entrada correcta.
                 cms_b64 = subprocess.check_output([OPENSSL_BIN, 'base64'], input=cms_der).decode().strip()
                 
                 # --- 3. AUTENTICAR EN WSAA ---
@@ -210,7 +208,6 @@ def consultar_cuit_afip(cuit_consultado_str):
                 try:
                     os.unlink(path)
                 except OSError as e:
-                    # Esto puede ocurrir si el archivo ya fue eliminado o hay permisos
                     app.logger.warning(f"No se pudo eliminar el archivo temporal {path}: {e}")
 
 # =================================================================
@@ -239,16 +236,13 @@ def index():
             if mensaje_error and persona_data is None:
                 error_message = mensaje_error
             else:
-                # El servicio devuelve una respuesta, aunque puede ser solo una nota de error dentro de la estructura SOAP
                 consulta_cuit = cuit_consulta
                 
-                # Intentar obtener la razón social de forma segura (puede ser None si hay un error suave)
                 dg = getattr(persona_data, 'datosGenerales', None)
                 if dg:
                     razon_social = getattr(dg, 'razonSocial', None)
                 
                 if not dg or not razon_social:
-                     # Caso donde CUIT no existe o error en los datos
                     error_message = mensaje_error or f"El CUIT {cuit_consulta} no devolvió datos generales."
                     
                     return render_template('index.html',
@@ -332,7 +326,6 @@ def gestion_claves(cuit=None):
                     flash("Clave eliminada.", 'success')
                 
                 conn.commit()
-                # Redirigir para evitar que el POST se ejecute de nuevo al recargar
                 return redirect(url_for('gestion_claves', cuit=cuit))
 
     except Exception as e:
@@ -528,7 +521,6 @@ def load_data_from_excel():
                     if cuit.isdigit() and len(cuit) >= 10:
                         # 1. Insertar Cliente (ignorar duplicados)
                         try:
-                            # ON DUPLICATE KEY UPDATE o INSERT IGNORE (depende de la configuración de la tabla)
                             cursor.execute("INSERT IGNORE INTO clientes_afip (cuit, razon_social) VALUES (%s, %s)", (cuit, razon_social))
                         except Exception:
                             pass # Ignoramos si ya existe
@@ -593,5 +585,4 @@ def format_afip_result_html(persona, cuit):
 if __name__ == '__main__':
     # Usar un puerto dinámico en Render
     port = int(os.environ.get('PORT', 5000))
-    # Asegúrate de que 'templates' y 'static' existan si vas a usar un servidor real
     app.run(host='0.0.0.0', port=port, debug=True)
