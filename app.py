@@ -64,7 +64,6 @@ def get_db_connection():
         return conn
     except Exception as e:
         app.logger.error(f"Error CRÍTICO al conectar a la base de datos: {e}")
-        # NO usamos flash aquí para evitar errores al inicio de la app, solo en rutas
         return None
 
 # =================================================================
@@ -129,7 +128,7 @@ def consultar_cuit_afip(cuit_consultado_str):
             tmp_lt_path = tmp_lt.name
             tmp_cms_der_path = tmp_cms_der.name
             
-            # Asegurarse de que se escriban los archivos antes de cerrarlos
+            # Asegurarse de que se escriban los archivos antes de OpenSSL
             tmp_cert.close()
             tmp_key.close()
 
@@ -320,7 +319,6 @@ def gestion_claves(cuit=None):
 def gestion_certificados():
     conn = get_db_connection()
     if not conn: 
-        # Si la conexión falla, redirige con el error, pero la aplicación no crashea
         flash("Error crítico de conexión a la base de datos.", 'error')
         return redirect(url_for('index'))
 
@@ -394,9 +392,20 @@ def gestion_certificados():
         
         try:
             with conn.cursor() as cursor:
-                # Esta consulta ya no debería fallar si la DB está bien (ya lo comprobamos)
+                # 1. Traer datos
                 cursor.execute("SELECT id, fecha_alta, fecha_vencimiento, nombre_archivo, activo FROM certificados ORDER BY fecha_vencimiento DESC")
-                certificados = cursor.fetchall()
+                raw_certificados = cursor.fetchall()
+                
+                # 2. CONVERTIR FECHAS A STRING (SOLUCIÓN AL ERROR 500 DE SERIALIZACIÓN)
+                for cert in raw_certificados:
+                    if cert['fecha_alta']:
+                         # Convertir objeto datetime a string legible
+                        cert['fecha_alta'] = cert['fecha_alta'].strftime('%Y-%m-%d %H:%M:%S')
+                    if cert['fecha_vencimiento']:
+                        # Convertir objeto date a string legible
+                        cert['fecha_vencimiento'] = cert['fecha_vencimiento'].strftime('%Y-%m-%d')
+                    
+                    certificados.append(cert)
             
         except Exception as e:
             # Si la lectura falla por cualquier razón, lo logeamos y devolvemos lista vacía
