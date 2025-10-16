@@ -1,0 +1,65 @@
+{% extends "layout.html" %}
+
+{% block title %}Gestión de Certificados{% endblock %}
+
+{% block content %}
+    <h2>Certificados AFIP (WSAA)</h2>
+
+    <h3>Subir Nuevo Certificado</h3>
+    <form method="POST" enctype="multipart/form-data">
+        <p>Los archivos deben estar en formato PEM (texto):</p>
+        <div class="form-group">
+            <label for="cert_file">Certificado (.crt):</label>
+            <input type="file" id="cert_file" name="cert_file" accept=".crt" required>
+        </div>
+        <div class="form-group">
+            <label for="key_file">Clave Privada (.key):</label>
+            <input type="file" id="key_file" name="key_file" accept=".key" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Subir y Activar Certificado</button>
+        <p style="font-size: 0.9em; color: #777; margin-top: 10px;">Al subir un nuevo certificado, el anterior se desactiva automáticamente.</p>
+    </form>
+
+    <h3 style="margin-top: 40px;">Historial de Certificados</h3>
+    
+    {% if certificados %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Nombre de Archivo</th>
+                    <th>Fecha de Alta</th>
+                    <th>Vencimiento</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cert in certificados %}
+                    <tr>
+                        <td>{{ cert.nombre_archivo }}</td>
+                        <td>{{ cert.fecha_alta.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td style="font-weight: bold; color: {% if (cert.fecha_vencimiento - today).days < 30 %}red{% elif (cert.fecha_vencimiento - today).days < 90 %}orange{% else %}green{% endif %}">
+                            {{ cert.fecha_vencimiento.strftime('%Y-%m-%d') }}
+                        </td>
+                        <td>
+                            {% if cert.activo %}
+                                <span style="color: green; font-weight: bold;">ACTIVO</span>
+                            {% else %}
+                                Inactivo
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="POST" style="display: inline;" onsubmit="return confirm('¿Confirmar eliminación del historial?')">
+                                <input type="hidden" name="delete_id" value="{{ cert.id }}">
+                                <button type="submit" class="btn btn-danger btn-small">Eliminar</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% set today = datetime.date.today() %}
+    {% else %}
+        <p class="flash info">No hay certificados registrados en la base de datos.</p>
+    {% endif %}
+{% endblock %}

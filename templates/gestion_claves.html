@@ -1,0 +1,95 @@
+{% extends "layout.html" %}
+
+{% block title %}Gestión de Claves{% endblock %}
+
+{% block content %}
+    <h2>Gestión de Claves por Cliente</h2>
+
+    <div class="form-group">
+        <label for="cuit_select">Seleccionar Cliente:</label>
+        <select id="cuit_select" onchange="window.location.href = '/gestion_claves/' + this.value">
+            <option value="">-- Seleccione un CUIT --</option>
+            {% for cliente in clientes %}
+                <option value="{{ cliente.cuit }}" {% if cuit_seleccionado == cliente.cuit %}selected{% endif %}>
+                    {{ cliente.razon_social }} ({{ cliente.cuit }})
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    {% if cuit_seleccionado %}
+        <h3>Claves Registradas para CUIT: {{ cuit_seleccionado }}</h3>
+
+        {% if claves %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Descripción</th>
+                        <th>Usuario</th>
+                        <th>Clave</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for clave in claves %}
+                    <tr id="clave-row-{{ clave.id }}">
+                        <td>{{ clave.descripcion_clave }}</td>
+                        <td>{{ clave.usuario }}</td>
+                        <td>{{ clave.clave }}</td>
+                        <td>
+                            <button onclick="toggleEdit({{ clave.id }})" class="btn btn-info btn-small">Editar</button>
+                            <form method="POST" style="display: inline;" onsubmit="return confirm('¿Confirmar eliminación?')">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="key_id" value="{{ clave.id }}">
+                                <button type="submit" class="btn btn-danger btn-small">Eliminar</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <tr id="edit-row-{{ clave.id }}" style="display:none; background-color: #fff3cd;">
+                        <form method="POST">
+                            <input type="hidden" name="action" value="update">
+                            <input type="hidden" name="key_id" value="{{ clave.id }}">
+                            <td><input type="text" name="desc" value="{{ clave.descripcion_clave }}" required></td>
+                            <td><input type="text" name="user" value="{{ clave.usuario }}" required></td>
+                            <td><input type="password" name="pw" value="{{ clave.clave }}" required></td>
+                            <td>
+                                <button type="submit" class="btn btn-success btn-small">Guardar</button>
+                                <button type="button" onclick="toggleEdit({{ clave.id }})" class="btn btn-primary btn-small">Cancelar</button>
+                            </td>
+                        </form>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="flash info">No hay claves registradas para este CUIT.</p>
+        {% endif %}
+
+        <h4 style="margin-top: 20px;">Agregar Nueva Clave</h4>
+        <form method="POST">
+            <input type="hidden" name="action" value="add">
+            <div class="form-group">
+                <label>Descripción:</label><input type="text" name="desc" required>
+                <label>Usuario:</label><input type="text" name="user" required>
+                <label>Clave:</label><input type="password" name="pw" required>
+            </div>
+            <button type="submit" class="btn btn-success">Guardar Nueva Clave</button>
+        </form>
+
+        <script>
+            function toggleEdit(id) {
+                var row = document.getElementById('clave-row-' + id);
+                var editRow = document.getElementById('edit-row-' + id);
+                if (editRow.style.display === 'none') {
+                    row.style.display = 'none';
+                    editRow.style.display = 'table-row';
+                } else {
+                    row.style.display = 'table-row';
+                    editRow.style.display = 'none';
+                }
+            }
+        </script>
+    {% else %}
+        <p class="flash info">Por favor, seleccione un cliente de la lista.</p>
+    {% endif %}
+{% endblock %}
