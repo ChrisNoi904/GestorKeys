@@ -1,0 +1,7 @@
+Flask
+pymysql
+zeep
+requests
+openpyxl
+cryptography
+gunicorn
