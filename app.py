@@ -6,6 +6,7 @@ import tempfile
 import pathlib
 import sys
 import base64
+import ssl # Importar módulo SSL para la validación del certificado
 from xml.etree import ElementTree as ET
 
 # Librerías necesarias para la migración
@@ -14,8 +15,8 @@ import pymysql
 from zeep import Client
 from zeep.transports import Transport
 from openpyxl import load_workbook
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
+
+# NOTA IMPORTANTE: Se eliminaron las importaciones de cryptography que generaban el error
 
 # =================================================================
 #                         CONFIGURACIÓN Y GLOBALES
@@ -34,18 +35,17 @@ CLAVES_FILE = pathlib.Path(__file__).parent / "claves.xlsx"
 
 # --- Configuración de Base de Datos (Desde Variables de Entorno de Render) ---
 DB_HOST = os.environ.get("DB_HOST", "srv1591.hstgr.io") 
-DB_USER = os.environ.get("DB_USER", "tu_usuario_hostinger") # Cambiar si no usas Render
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "tu_contraseña_hostinger") # Cambiar
+DB_USER = os.environ.get("DB_USER", "tu_usuario_hostinger") 
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "tu_contraseña_hostinger") 
 DB_NAME = os.environ.get("DB_NAME", "u822656934_claves_cliente")
 DB_PORT = int(os.environ.get("DB_PORT", 3306))
 
 # --- Configuración del binario OpenSSL ---
-# En Render/Linux, 'openssl' está disponible globalmente. Si usa Docker, debe asegurarse de instalarlo.
 OPENSSL_BIN = "openssl" 
 
 # Inicializar Flask
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "una_clave_secreta_fuerte") # CLAVE SECRETA OBLIGATORIA
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "una_clave_secreta_fuerte") 
 
 # =================================================================
 #                         FUNCIONES DE BASE DE DATOS
@@ -105,8 +105,8 @@ def consultar_cuit_afip(cuit_consultado_str):
     if not cert_content or not key_content:
         return None, "No se encontraron certificados AFIP activos en la base de datos."
 
-    resultado = ""
     # Creamos archivos temporales en el sistema de archivos de Render (/tmp)
+    # Escribimos los contenidos binarios de la DB a archivos temporales para que OpenSSL pueda usarlos
     with tempfile.NamedTemporaryFile(delete=False) as tmp_cert, \
          tempfile.NamedTemporaryFile(delete=False) as tmp_key, \
          tempfile.NamedTemporaryFile(mode='w', delete=False, encoding="utf-8") as tmp_lt, \
@@ -222,7 +222,7 @@ def index():
                     if save_client_to_db(consulta_cuit, razon_social):
                         flash(f"Cliente {razon_social} ({consulta_cuit}) guardado exitosamente.", 'success')
                     else:
-                        flash(f"El cliente {consulta_cuit} ya estaba registrado.", 'info')
+                        flash(f"El cliente {cuit_consulta} ya estaba registrado.", 'info')
                 
                 return render_template('index.html', 
                                        resultado_html=resultado_html, 
@@ -304,6 +304,8 @@ def gestion_certificados():
     conn = get_db_connection()
     if not conn: return redirect(url_for('index'))
 
+    tmp_cert_path = None # Inicializar para el bloque finally
+    
     try:
         if request.method == 'POST':
             if 'cert_file' in request.files and 'key_file' in request.files:
@@ -314,15 +316,25 @@ def gestion_certificados():
                     cert_content = cert_file.read()
                     key_content = key_file.read()
                     
-                    # 1. Validar y obtener vencimiento (Opcional pero muy recomendado)
+                    # 1. Validar y obtener vencimiento (NUEVA LÓGICA CON SSL)
                     try:
-                        cert = serialization.load_pem_x509_certificate(cert_content, default_backend())
-                        vencimiento = cert.not_valid_after.date()
+                        # Crear un archivo temporal para el certificado en el sistema de archivos
+                        with tempfile.NamedTemporaryFile(delete=False) as tmp_cert:
+                            tmp_cert.write(cert_content)
+                            tmp_cert_path = tmp_cert.name
+                        
+                        # Usar la función interna de ssl para decodificar la información del certificado
+                        cert_data = ssl._ssl._test_decode_cert(tmp_cert_path)
+                        vencimiento_str = cert_data['notAfter']
+                        
+                        # Convertir la fecha de formato 'MMM DD HH:MM:SS YYYY GMT' a objeto date
+                        vencimiento = datetime.datetime.strptime(vencimiento_str, '%b %d %H:%M:%S %Y GMT').date()
+                        
                     except Exception as e:
-                        flash(f"Error al leer el certificado (.crt): {e}. Asegúrese que esté en formato PEM (texto).", 'error')
+                        flash(f"Error al leer el certificado (.crt) usando SSL. Asegúrese que sea un certificado X.509 válido en formato PEM y sin cifrar: {e}", 'error')
                         return redirect(url_for('gestion_certificados'))
 
-                    # 2. Desactivar todos los certificados anteriores (opcional, para mantener el historial limpio)
+                    # 2. Desactivar todos los certificados anteriores
                     with conn.cursor() as cursor:
                         cursor.execute("UPDATE certificados SET activo = 0")
                         
@@ -343,16 +355,23 @@ def gestion_certificados():
 
         # Obtener historial de certificados
         with conn.cursor() as cursor:
+            # Obtener la fecha de hoy para el template
+            today = datetime.date.today()
+            
             cursor.execute("SELECT id, fecha_alta, fecha_vencimiento, nombre_archivo, activo FROM certificados ORDER BY fecha_vencimiento DESC")
             certificados = cursor.fetchall()
             
     except Exception as e:
         flash(f"Error en la gestión de certificados: {e}", 'error')
         certificados = []
+        today = datetime.date.today()
     finally:
-        conn.close()
+        # Asegurarse de que el archivo temporal se elimine
+        if tmp_cert_path and os.path.exists(tmp_cert_path):
+            os.unlink(tmp_cert_path)
+        if conn: conn.close()
 
-    return render_template('gestion_certificados.html', certificados=certificados)
+    return render_template('gestion_certificados.html', certificados=certificados, today=today)
 
 # =================================================================
 #                         FUNCIONES CRUD/AUXILIARES
@@ -387,6 +406,7 @@ def load_data_from_excel():
     if not CLAVES_FILE.exists():
         return False
 
+    conn = None
     try:
         wb = load_workbook(CLAVES_FILE)
         ws = wb["Hoja1"]
@@ -448,8 +468,6 @@ def format_afip_result_html(persona, cuit):
     html += f"<p><strong>Estado Clave:</strong> {dg.estadoClave}</p>"
     dom = dg.domicilioFiscal
     html += f"<p><strong>Domicilio Fiscal:</strong> {dom.direccion} | {dom.localidad} | {dom.descripcionProvincia} | CP: {dom.codPostal}</p>"
-    
-    # ... (Se pueden añadir más secciones de Monotributo y Regimen General si es necesario)
     
     return html
 
