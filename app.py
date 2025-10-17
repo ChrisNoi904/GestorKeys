@@ -7,8 +7,13 @@ import pathlib
 import sys
 import base64
 import pymysql.cursors 
-import json # 🟢 NUEVA IMPORTACIÓN para el logging
+import json 
 from xml.etree import ElementTree as ET
+
+# --- NUEVAS IMPORTACIONES DE SEGURIDAD ---
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+# --- FIN NUEVAS IMPORTACIONES DE SEGURIDAD ---
 
 # Librerías necesarias para la migración y web
 from flask import Flask, render_template, request, redirect, url_for, flash
@@ -44,8 +49,75 @@ OPENSSL_BIN = "openssl"
 
 # Inicializar Flask
 app = Flask(__name__)
-# Usar una clave secreta de entorno para producción
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "una_clave_secreta_fuerte") 
+# Usar una clave secreta de entorno para producción (¡DEBE SER MUY FUERTE!)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_y_larga_debes_cambiarla") 
+
+# =================================================================
+#                       CONFIGURACIÓN FLASK-LOGIN
+# =================================================================
+login_manager = LoginManager()
+login_manager.init_app(app)
+# Ruta a la que se redirige si un usuario no logueado intenta acceder a una página protegida
+login_manager.login_view = 'login' 
+login_manager.login_message = "Por favor, inicia sesión para acceder a esta página."
+
+# Clase User: Define cómo Flask-Login interactúa con tu objeto de usuario
+class User(UserMixin):
+    def __init__(self, id, username):
+        self.id = id
+        self.username = username
+
+# Función requerida por Flask-Login para cargar un usuario a partir de su ID de sesión
+@login_manager.user_loader
+def load_user(user_id):
+    conn = get_db_connection()
+    if not conn: return None
+    try:
+        with conn.cursor() as cursor:
+            # Busca al usuario por su ID
+            cursor.execute("SELECT id, username FROM users WHERE id = %s", (user_id,))
+            user_data = cursor.fetchone()
+            if user_data:
+                return User(user_data['id'], user_data['username'])
+            return None
+    except Exception as e:
+        app.logger.error(f"Error al cargar usuario en load_user: {e}")
+        return None
+    finally:
+        if conn: conn.close()
+        
+# -----------------------------------------------------------------
+# ⚠️ ADVERTENCIA: Función para inicializar un usuario admin.
+# Úsala UNA SOLA VEZ para insertar tu primer usuario en la tabla 'users'.
+# Después de ejecutarla con éxito, ELIMINA la línea de llamada en el __main__.
+# -----------------------------------------------------------------
+def create_initial_admin(username="admin_gestor", password="TuContrasenaFuerte"):
+    conn = get_db_connection()
+    if not conn: return False
+    try:
+        with conn.cursor() as cursor:
+            # 1. Verificar si el usuario ya existe
+            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+            if cursor.fetchone():
+                return True
+            
+            # 2. Insertar nuevo usuario con contraseña hasheada
+            hashed_password = generate_password_hash(password)
+            sql = "INSERT INTO users (username, password_hash) VALUES (%s, %s)"
+            cursor.execute(sql, (username, hashed_password))
+            conn.commit()
+            app.logger.info(f"ADMIN '{username}' CREADO. ¡CAMBIA LA CONTRASEÑA EN EL CÓDIGO Y EN LA DB DESPUÉS DE LOGUEARTE!")
+            return True
+    except pymysql.err.ProgrammingError as pe:
+         app.logger.error(f"Error de programación (pymysql): ¿La tabla 'users' ha sido creada? Error: {pe}")
+         return False
+    except Exception as e:
+        app.logger.error(f"Error al crear el admin inicial: {e}")
+        return False
+    finally:
+        if conn: conn.close()
+# -----------------------------------------------------------------
+
 
 # =================================================================
 #                         FUNCIONES DE BASE DE DATOS
@@ -68,7 +140,7 @@ def get_db_connection():
         return None
 
 # =================================================================
-#                         LÓGICA AFIP (ADAPTADA A LA DB)
+#                         LÓGICA AFIP
 # =================================================================
 
 def obtener_certificados_activos():
@@ -95,7 +167,6 @@ def obtener_certificados_activos():
 def consultar_cuit_afip(cuit_consultado_str):
     """
     Función que maneja toda la lógica de conexión y consulta AFIP.
-    Utiliza los contenidos de certificado/key directamente desde la DB.
     """
     
     cuit_consultado_str = cuit_consultado_str.strip()
@@ -134,12 +205,8 @@ def consultar_cuit_afip(cuit_consultado_str):
             tmp_key.close()
 
             # --- 1. CREAR LoginTicketRequest ---
-            # FIX FINAL: Usar UTC, margen reducido y sufijo 'Z' para formato ISO 8601
             ahora_utc = datetime.datetime.utcnow() 
-            
-            # 1 minuto de margen hacia el pasado (GenerationTime).
             generation_time = (ahora_utc - datetime.timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
-            # 10 minutos de margen hacia el futuro (ExpirationTime)
             expiration_time = (ahora_utc + datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
 
             login_ticket = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -257,7 +324,6 @@ def load_data_from_excel():
         user_idx = headers.index('usuario')
         clave_idx = headers.index('clave')
         
-        # Intentar encontrar 'razon_social' si existe, sino usar un placeholder
         try:
              razon_social_idx = headers.index('razon_social')
         except ValueError:
@@ -281,13 +347,16 @@ def load_data_from_excel():
                         try:
                             cursor.execute("INSERT IGNORE INTO clientes_afip (cuit, razon_social) VALUES (%s, %s)", (cuit, razon_social))
                         except Exception:
-                            pass # Ignoramos si ya existe
+                            pass 
 
                         # 2. Insertar Clave
                         desc = str(row[desc_idx] or "").strip()
                         user = str(row[user_idx] or "").strip()
                         pw = str(row[clave_idx] or "").strip()
                         
+                        # NOTA DE SEGURIDAD: Aquí se inserta la clave en texto plano.
+                        # En la siguiente fase, esta función se modificará para
+                        # insertar la clave CIFRADA.
                         sql = "INSERT INTO claves (cuit, descripcion_clave, usuario, clave) VALUES (%s, %s, %s, %s)"
                         cursor.execute(sql, (cuit, desc, user, pw))
             
@@ -341,42 +410,35 @@ def format_afip_result_html(persona, cuit):
         html += f"<p><strong>CP:</strong> {getattr(dom, 'codPostal', '—')}</p>"
         
     # =================================================================
-    # DATOS DEL MONOTRIBUTO (Si existen) - BLOQUE DE CONTROL Y LÓGICA
+    # DATOS DEL MONOTRIBUTO (Bloque de Control y Lógica)
     # =================================================================
     datos_monotributo = getattr(persona, 'datosMonotributo', None)
     
     desc_cat = ''
     
     if datos_monotributo:
-        # 🟢 BLOQUE DE CONTROL DE LOGS: Volcado de la estructura de Monotributo
+        # Bloque de control de logs (usando WARNING para asegurar que se muestre en Render)
         try:
-            # Convertir el objeto Zeep a un diccionario serializable para el log
             monotributo_log_data = serialize_object(datos_monotributo)
-            
-            # Loguear la estructura de datos del Monotributo
             log_message = f"\n--- INICIO LOG MONOTRIBUTO CUIT: {cuit} ---\n"
-            # Usamos json.dumps para formatear la salida como JSON legible
             log_message += json.dumps(monotributo_log_data, indent=2, ensure_ascii=False)
             log_message += f"\n--- FIN LOG MONOTRIBUTO CUIT: {cuit} ---\n"
-            
-            # app.logger.info es el método estándar para logs en Flask/Render
-            app.logger.info(log_message)
+            # 🟢 Cambiado a WARNING para asegurar la visibilidad en Render
+            app.logger.warning(log_message) 
         except Exception as e:
             app.logger.error(f"Error al serializar el objeto Monotributo para log: {e}")
-        # 🟢 FIN BLOQUE DE CONTROL DE LOGS
+        
 
-        # LÓGICA ROBUSTA PARA OBTENER LA CATEGORÍA (MANTENIDA)
-        # 1. Intentar obtener la descripción de la categoría directamente del nodo principal
+        # LÓGICA ROBUSTA PARA OBTENER LA CATEGORÍA
         desc_cat = str(getattr(datos_monotributo, 'descripcionCategoria', '')).strip()
         
-        # Si no se encontró en el nodo principal, buscar en el nodo anidado
         if not desc_cat:
             categoria = getattr(datos_monotributo, 'categoriaMonotributo', None)
             if categoria:
                 # 2. Buscar en el camino 'descripcionCategoriaMonotributo' (el más largo)
                 desc_cat = str(getattr(categoria, 'descripcionCategoriaMonotributo', '')).strip()
                 
-                # 3. Si sigue sin aparecer, buscar en el camino 'descripcionCategoria' (el que sugería su bloque)
+                # 3. Si sigue sin aparecer, buscar en el camino 'descripcionCategoria'
                 if not desc_cat:
                     desc_cat = str(getattr(categoria, 'descripcionCategoria', '')).strip()
 
@@ -387,7 +449,7 @@ def format_afip_result_html(persona, cuit):
 
 
     # =================================================================
-    # DATOS DEL RÉGIMEN GENERAL (Resto de la lógica se mantiene)
+    # DATOS DEL RÉGIMEN GENERAL
     # =================================================================
     
     datos_regimen_general = getattr(persona, 'datosRegimenGeneral', None)
@@ -427,7 +489,56 @@ def format_afip_result_html(persona, cuit):
 #                         RUTAS FLASK
 # =================================================================
 
+# --------------------------- RUTA DE LOGIN ---------------------------
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        
+        conn = get_db_connection()
+        if not conn:
+            flash("Error de conexión a la base de datos.", 'error')
+            return render_template('login.html')
+            
+        user_data = None
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, username, password_hash FROM users WHERE username = %s", (username,))
+                user_data = cursor.fetchone()
+        except Exception as e:
+             app.logger.error(f"Error al buscar usuario: {e}")
+             flash("Error en la autenticación. Consulte logs.", 'error')
+             return render_template('login.html')
+        finally:
+            if conn: conn.close()
+
+        if user_data and check_password_hash(user_data['password_hash'], password):
+            user = User(user_data['id'], user_data['username'])
+            login_user(user)
+            flash('¡Inicio de sesión exitoso!', 'success')
+            next_page = request.args.get('next')
+            return redirect(next_page or url_for('index'))
+        else:
+            flash('Usuario o contraseña incorrectos.', 'error')
+            
+    return render_template('login.html')
+
+# --------------------------- RUTA DE LOGOUT ---------------------------
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('Sesión cerrada correctamente.', 'info')
+    return redirect(url_for('login'))
+
+
+# --------------------------- RUTA PRINCIPAL ---------------------------
 @app.route('/', methods=['GET', 'POST'])
+@login_required # ⬅️ RUTA PROTEGIDA
 def index():
     consulta_cuit = None
     razon_social = None
@@ -493,8 +604,10 @@ def index():
 
     return render_template('index.html', error_message=error_message)
 
+# --------------------------- GESTIÓN DE CLAVES ---------------------------
 @app.route('/gestion_claves', methods=['GET', 'POST'])
 @app.route('/gestion_claves/<cuit>', methods=['GET', 'POST'])
+@login_required # ⬅️ RUTA PROTEGIDA
 def gestion_claves(cuit=None):
     if request.method == 'POST' and request.form.get('cuit'):
         cuit = request.form.get('cuit')
@@ -525,6 +638,9 @@ def gestion_claves(cuit=None):
                     desc = request.form['desc']
                     user = request.form['user']
                     pw = request.form['pw']
+                    
+                    # NOTA DE SEGURIDAD: Aquí se inserta la clave en texto plano.
+                    # Esto se modificará en la siguiente fase para cifrarla.
                     sql = "INSERT INTO claves (cuit, descripcion_clave, usuario, clave) VALUES (%s, %s, %s, %s)"
                     cursor.execute(sql, (cuit, desc, user, pw))
                     flash("Clave agregada.", 'success')
@@ -534,12 +650,15 @@ def gestion_claves(cuit=None):
                     desc = request.form['desc']
                     user = request.form['user']
                     pw = request.form['pw']
+                    
+                    # NOTA DE SEGURIDAD: Aquí se actualiza la clave en texto plano.
+                    # Esto se modificará en la siguiente fase para cifrarla.
                     sql = "UPDATE claves SET descripcion_clave=%s, usuario=%s, clave=%s WHERE id=%s AND cuit=%s"
                     cursor.execute(sql, (desc, user, pw, key_id, cuit))
                     flash("Clave actualizada.", 'success')
 
                 elif action == 'delete' and cuit:
-                    key_id = request.form['key_id']
+                    key_id = request.form['delete_id']
                     sql = "DELETE FROM claves WHERE id=%s AND cuit=%s"
                     cursor.execute(sql, (key_id, cuit))
                     flash("Clave eliminada.", 'success')
@@ -554,7 +673,9 @@ def gestion_claves(cuit=None):
 
     return render_template('gestion_claves.html', clientes=clientes, claves=claves, cuit_seleccionado=cuit)
 
+# --------------------------- GESTIÓN DE CERTIFICADOS ---------------------------
 @app.route('/gestion_certificados', methods=['GET', 'POST'])
+@login_required # ⬅️ RUTA PROTEGIDA
 def gestion_certificados():
     conn = get_db_connection()
     if not conn: 
@@ -591,7 +712,8 @@ def gestion_certificados():
                             raise ValueError(f"Formato de fecha de OpenSSL inesperado: {vencimiento_output}")
                         
                         vencimiento_str = vencimiento_output.split('=')[1].strip()
-                        vencimiento = datetime.datetime.strptime(vencimiento_str, '%b %d %H:%M:%S %Y GMT').date()
+                        # Formato: Sep 20 18:28:16 2025 GMT
+                        vencimiento = datetime.datetime.strptime(vencimiento_str, '%b %d %H:%M:%S %Y GMT').date() 
                         app.logger.info(f"Vencimiento extraído por OpenSSL: {vencimiento}")
                         
                     except Exception as e:
@@ -649,5 +771,14 @@ def gestion_certificados():
 
 
 if __name__ == '__main__':
+    
+    # -----------------------------------------------------------------
+    # 🚨 ADVERTENCIA IMPORTANTE 🚨
+    # DESCOMENTA la línea siguiente UNA SOLA VEZ para crear el usuario 'admin_gestor'.
+    # Una vez que te hayas logueado con éxito, ELIMINA o COMENTA esta línea de nuevo
+    # antes de desplegar en Render para evitar crear el usuario cada vez que se inicie el servidor.
+    # -----------------------------------------------------------------
+    # create_initial_admin(username="admin_gestor", password="MiClaveSuperSegura123") 
+    
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
