@@ -308,7 +308,7 @@ def load_data_from_excel():
 def format_afip_result_html(persona, cuit):
     """
     Formatea la respuesta del servicio AFIP a una cadena HTML legible,
-    incluyendo Domicilio, Actividades, Impuestos y Regímenes (Ret/Per).
+    incluyendo Domicilio, Monotributo, Actividades, Impuestos y Regímenes.
     """
     if persona is None: return "No se recibieron datos de AFIP."
     
@@ -346,18 +346,24 @@ def format_afip_result_html(persona, cuit):
         html += f"<p><strong>Localidad/Provincia:</strong> {getattr(dom, 'localidad', '—')} | {getattr(dom, 'descripcionProvincia', '—')}</p>"
         html += f"<p><strong>CP:</strong> {getattr(dom, 'codPostal', '—')}</p>"
         
-    # --------------------------- ACTIVIDADES ---------------------------
-    actividades_list = getattr(getattr(persona, 'actividades', None), 'actividad', [])
+    # =================================================================
+    # DATOS DEL MONOTRIBUTO (Si existen)
+    # =================================================================
+    datos_monotributo = getattr(persona, 'datosMonotributo', None)
     
-    if actividades_list:
-        html += f"<h3>Actividades</h3>"
+    if datos_monotributo:
+        categoria = getattr(datos_monotributo, 'categoriaMonotributo', None)
         
-        if not isinstance(actividades_list, list):
-            actividades_list = [actividades_list]
+        if categoria:
+            html += f"<h3>Datos del Monotributo</h3>"
+            # Se usa el campo descripcionCategoriaMonotributo si está disponible
+            desc_cat = getattr(categoria, 'descripcionCategoriaMonotributo', '')
+            html += f"<p><strong>CATEGORÍA:</strong> {desc_cat}</p>"
 
-        for act in actividades_list:
-            principal = ' (Principal)' if getattr(act, 'periodo', '') else ''
-            html += f"<p>- Cód. {getattr(act, 'idActividad', '—')}: {getattr(act, 'descripcionActividad', '—')}{principal}</p>"
+
+    # =================================================================
+    # DATOS DEL RÉGIMEN GENERAL (Incluye Jurídicas y Monotributistas con IIBB/Municipales)
+    # =================================================================
     
     # --------------------------- IMPUESTOS ---------------------------
     impuestos_list = getattr(getattr(persona, 'impuestos', None), 'impuesto', [])
@@ -370,6 +376,19 @@ def format_afip_result_html(persona, cuit):
 
         for imp in impuestos_list:
             html += f"<p>- ID {getattr(imp, 'idImpuesto', '—')}: {getattr(imp, 'descripcionImpuesto', '—')}</p>"
+
+    # --------------------------- ACTIVIDADES ---------------------------
+    actividades_list = getattr(getattr(persona, 'actividades', None), 'actividad', [])
+    
+    if actividades_list:
+        html += f"<h3>Actividades</h3>"
+        
+        if not isinstance(actividades_list, list):
+            actividades_list = [actividades_list]
+
+        for act in actividades_list:
+            principal = ' (Principal)' if getattr(act, 'periodo', '') else ''
+            html += f"<p>- Cód. {getattr(act, 'idActividad', '—')}: {getattr(act, 'descripcionActividad', '—')}{principal}</p>"
 
     # --------------------------- REGIMENES (RET/PER) ---------------------------
     regimenes_list = getattr(getattr(persona, 'regimenes', None), 'regimen', [])
