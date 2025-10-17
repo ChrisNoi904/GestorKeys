@@ -7,3 +7,5 @@ cryptography>=41.0.0  # <--- ASEGURAMOS UNA VERSION RECIENTE
 gunicorn>=20.0.0
 Flask-Login  # <- Añadir esta línea
 Werkzeug     # <- Añadir esta línea
+SQLAlchemy
+Flask-SQLAlchemy
