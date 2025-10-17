@@ -2,22 +2,39 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <!-- Usamos el título del bloque, con un fallback si no se define -->
+    <title>{% block title %}Gestor AFIP Cloud{% endblock %}</title>
+    
+    <!-- Configuración para asegurar que se vea bien en móviles -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Gestor de Claves AFIP{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Select2 CSS para campos de selección avanzados -->
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    
+    <!-- Estilos CSS personalizados (basados en tu original, pero mejorados) -->
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f4f4f9;
-            margin: 0;
-            padding-top: 60px; /* Espacio para el header fijo */
+        /* Tipografía e inicio del cuerpo */
+        body { font-family: Arial, sans-serif; margin: 0; padding-top: 60px; /* Espacio para el header fijo */ background-color: #f4f4f9; }
+
+        /* Contenedor principal de la página */
+        .main-content { 
+            width: 90%; 
+            max-width: 1100px; 
+            margin: 20px auto; 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15); /* Sombra más pronunciada */
+            min-height: calc(100vh - 100px); /* Para asegurar que el footer esté abajo si hay poco contenido */
         }
+        
+        /* Header Fijo y Navegación */
         .header {
-            background-color: #0056b3;
+            background-color: #3f51b5; /* Azul profundo (similar a AFIP/Bootstrap primary) */
             color: white;
             padding: 15px 20px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            position: fixed;
+            position: fixed; /* Lo hace fijo al scroll */
             top: 0;
             left: 0;
             right: 0;
@@ -26,131 +43,175 @@
             justify-content: space-between;
             align-items: center;
         }
+
+        /* Título */
         .header h1 {
             margin: 0;
             font-size: 1.5rem;
         }
+        
+        /* Links de navegación */
         .nav a {
             color: white;
+            margin-left: 15px;
             text-decoration: none;
-            padding: 8px 15px;
+            font-weight: bold;
+            padding: 8px 12px;
             border-radius: 6px;
             transition: background-color 0.2s;
-            margin-left: 10px;
         }
         .nav a:hover {
-            background-color: #004080;
+            background-color: #303f9f; /* Un tono un poco más oscuro al pasar el ratón */
         }
-        .main-content {
-            padding: 20px;
-            max-width: 1200px;
-            margin: 20px auto;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
-        }
-        .flash {
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
+
+        /* Mensajes Flash */
+        .flash { 
+            padding: 15px; 
+            margin-bottom: 20px; 
+            border-radius: 8px; /* Bordes más redondeados */
             font-weight: 500;
         }
-        .flash.error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .flash.success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .flash.info {
-            background-color: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-        .flash.warning {
-            background-color: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeeba;
-        }
+        .flash.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .flash.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .flash.info { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+        .flash.warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
         
-        .btn-delete {
-            background-color: #dc3545;
-            color: white;
-            padding: 6px 12px;
-            border-radius: 6px;
-            transition: background-color 0.2s;
+        /* Formulario y controles */
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; color: #333; }
+        
+        /* Estilo para los inputs */
+        input[type="text"], input[type="password"], select, input[type="date"], .select2-container { 
+            width: 100%; 
+            padding: 10px; 
+            border: 1px solid #ccc; 
+            border-radius: 4px; 
+            box-sizing: border-box; /* Importante para que el padding no afecte el ancho total */
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
-        .btn-delete:hover {
-            background-color: #c82333;
+        input[type="text"]:focus, input[type="password"]:focus, select:focus, input[type="date"]:focus, .select2-container:focus {
+            border-color: #3f51b5;
+            box-shadow: 0 0 0 0.2rem rgba(63, 81, 181, 0.25);
+            outline: none;
         }
-        .btn-add {
-            background-color: #28a745;
-            color: white;
-            padding: 6px 12px;
-            border-radius: 6px;
-            transition: background-color 0.2s;
+
+        /* Botones generales */
+        button, .btn { 
+            padding: 10px 18px; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            color: white; 
+            text-decoration: none; 
+            display: inline-block; 
+            font-weight: bold;
+            transition: background-color 0.2s, transform 0.1s;
         }
-        .btn-add:hover {
-            background-color: #1e7e34;
+        .btn:active, button:active {
+            transform: translateY(1px);
         }
-        .text-danger {
-            color: #dc3545;
+        .btn-primary { background-color: #3f51b5; }
+        .btn-primary:hover { background-color: #303f9f; }
+        
+        .btn-success { background-color: #4CAF50; }
+        .btn-success:hover { background-color: #45a049; }
+        
+        .btn-danger { background-color: #f44336; }
+        .btn-danger:hover { background-color: #d32f2f; }
+        
+        .btn-info { background-color: #00bcd4; }
+        .btn-info:hover { background-color: #00acc1; }
+        
+        /* Títulos de sección */
+        h2 { border-bottom: 2px solid #3f51b5; padding-bottom: 8px; margin-top: 30px; margin-bottom: 15px; color: #333; }
+        
+        /* Estilos de tabla */
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 15px; 
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        th, td { 
+            border: 1px solid #e0e0e0; 
+            padding: 12px; 
+            text-align: left; 
+        }
+        th { 
+            background-color: #f7f7f7; 
             font-weight: 600;
+            color: #555;
         }
-        /* Estilo para tablas */
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
+        tr:nth-child(even) {
+            background-color: #fafafa;
         }
-        .data-table th, .data-table td {
-            border: 1px solid #e2e8f0;
-            padding: 12px;
-            text-align: left;
+
+        /* Ajustes para Select2 */
+        .select2-container .select2-selection--single {
+            height: 40px !important; /* Altura ajustada */
+            border: 1px solid #ccc !important;
+            border-radius: 4px !important;
+            box-shadow: none !important;
+            line-height: 40px;
         }
-        .data-table th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-            color: #4a5568;
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            line-height: 20px !important; /* Ajuste para centrar texto */
+            padding-left: 10px;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__arrow {
+            height: 38px !important;
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Gestor de Claves AFIP</h1>
-        <div class="nav flex items-center">
+        <h1>Gestor AFIP Cloud</h1>
+        
+        <!-- Lógica de navegación condicional -->
+        <div class="nav">
             {% if current_user.is_authenticated %}
+                <!-- Links visibles solo si el usuario está logueado -->
                 <a href="{{ url_for('index') }}">Consulta AFIP</a>
                 <a href="{{ url_for('gestion_claves') }}">Gestión de Claves</a>
                 <a href="{{ url_for('gestion_certificados') }}">Certificados AFIP</a>
                 
-                <!-- Enlace de Logout -->
-                <span class="text-sm font-semibold ml-4 mr-2">
-                    {{ current_user.username }}
+                <!-- Usuario logueado y botón de Cerrar Sesión -->
+                <span style="color: #c5cae9; font-size: 0.9rem; margin-left: 20px;">
+                    Usuario: <strong>{{ current_user.username }}</strong>
                 </span>
-                <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-700">
+                <a href="{{ url_for('logout') }}" class="btn-danger" style="margin-left: 10px;">
                     Cerrar Sesión
                 </a> 
+            {% else %}
+                <!-- Links visibles si el usuario NO está logueado (ej. solo login) -->
+                <a href="{{ url_for('login') }}">Iniciar Sesión</a>
             {% endif %}
         </div>
     </div>
-    
+
     <div class="main-content">
-        <!-- Flash Messages -->
+        <!-- Manejo de Mensajes Flash -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <ul class="list-none p-0">
+                <div>
                 {% for category, message in messages %}
-                    <li class="flash {{ category }}">{{ message }}</li>
+                    <!-- La categoría se usa como clase para estilizar (ej. flash success) -->
+                    <div class="flash {{ category if category != 'message' else 'info' }}">{{ message }}</div>
                 {% endfor %}
-                </ul>
+                </div>
             {% endif %}
         {% endwith %}
         
+        <!-- Contenido de la página hija -->
         {% block content %}{% endblock %}
     </div>
+
+    <!-- Scripts de JQuery y Select2 (siempre necesarios) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    
+    <!-- Bloque para scripts específicos de la página hija -->
+    {% block scripts %}{% endblock %}
 </body>
 </html>
