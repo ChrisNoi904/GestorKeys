@@ -2,6 +2,7 @@ import os
 import pymysql.cursors 
 import json 
 import datetime
+import pathlib 
 
 # --- IMPORTACIONES DE SEGURIDAD Y WEB ---
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -9,8 +10,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, render_template, request, redirect, url_for, flash
 
 # --- IMPORTACIONES SOLO PARA LA CREACIÓN INICIAL DE TABLAS (SQLAlchemy temporal) ---
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.engine.reflection import Inspector
 # ---------------------------------------------------------------------------------
 
@@ -20,28 +21,27 @@ app = Flask(__name__)
 #                         CONFIGURACIÓN Y GLOBALES
 # =================================================================
 
-# --- LECTURA DE VARIABLES DE ENTORNO (Tus credenciales de Hostinger) ---
+# --- LECTURA DE VARIABLES DE ENTORNO (Método de conexión estable) ---
 DB_HOST = os.environ.get('DB_HOST', 'srv1591.hstgr.io')
 DB_NAME = os.environ.get('DB_NAME', 'u822656934_claves_cliente')
 DB_USER = os.environ.get('DB_USER', 'u822656934_estudionoya')
 DB_PASSWORD = os.environ.get('DB_PASSWORD', 'ArielNoya01')
-DB_PORT = os.environ.get('DB_PORT', '3306') 
+DB_PORT = int(os.environ.get('DB_PORT', 3306)) # Convertimos a entero
 
-# CONSTRUCCIÓN DE LA URL DE CONEXIÓN A HOSTINGER
-DB_URL_TEST = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
+# CONSTRUCCIÓN DE LA URL DE CONEXIÓN SOLO PARA LA LIBRERÍA SQLALCHEMY (Inicialización)
+DB_URL_TEST_SQLA = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
 
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'q8mYn_7f2sCj3XR5zT0Lp2E4wK9H_0qA7dFm9oG1vJ6I8uP4yS3xW0uY1rC7eB2')
 
 # Configuración del Login Manager
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = 'login_prueba' # <--- APUNTA AL LOGIN DE PRUEBA
+login_manager.login_view = 'login_prueba'
 login_manager.login_message = "Por favor, inicie sesión para acceder a esta página."
 
 
-# --- CLASE BASE DE USUARIO (SOLO PARA FLASK-LOGIN, NO ORM) ---
+# --- CLASE BASE DE USUARIO ---
 class User(UserMixin):
-    """Clase que Flask-Login necesita para saber si el usuario está autenticado."""
     def __init__(self, id, username, is_admin):
         self.id = id
         self.username = username
@@ -50,38 +50,41 @@ class User(UserMixin):
 # ------------------------------------------------------------
 
 
+# Función de conexión a DB (USO DEL MÉTODO DIRECTO Y ROBUSTO)
+def get_db_connection():
+    """Establece la conexión a la base de datos usando argumentos directos."""
+    return pymysql.connect(
+        host=DB_HOST,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME,
+        port=DB_PORT,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
 @login_manager.user_loader
 def load_user(user_id):
-    """Carga el usuario desde la tabla de prueba 'user_test' usando SQL directo."""
+    """Carga el usuario desde la tabla de prueba 'user_test'."""
     conn = None
     cursor = None
     user = None
     try:
-        db_params = pymysql.cursors.parse_connect_args(DB_URL_TEST)
-        conn = pymysql.connect(cursorclass=pymysql.cursors.DictCursor, **db_params)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Leemos de la tabla de PRUEBA
         cursor.execute("SELECT id, username, is_admin FROM user_test WHERE id = %s", (user_id,))
         user_data = cursor.fetchone()
 
         if user_data:
-            # Pymysql lee tinyint(1) como bool, lo convertimos a bool si no lo es
             is_admin_bool = bool(user_data['is_admin']) if isinstance(user_data['is_admin'], int) else user_data['is_admin']
             user = User(id=user_data['id'], username=user_data['username'], is_admin=is_admin_bool)
         return user
     except Exception as e:
-        print(f"Error al cargar usuario de prueba: {e}") 
+        print(f"Error al cargar usuario de prueba (load_user): {e}") 
         return None
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
-
-
-# Función de conexión a DB (adaptada de tu código original, para consultas directas)
-def get_db_connection():
-    db_params = pymysql.cursors.parse_connect_args(DB_URL_TEST)
-    return pymysql.connect(cursorclass=pymysql.cursors.DictCursor, **db_params)
 
 
 # =================================================================
@@ -95,11 +98,11 @@ class UserTestORM(Base):
     __tablename__ = 'user_test'
     id = Column(Integer, primary_key=True)
     username = Column(String(80), unique=True, nullable=False)
-    password_hash = Column(String(255), nullable=False) # Aumentado a 255 para seguridad de hash
+    password_hash = Column(String(255), nullable=False) 
     is_admin = Column(Boolean, default=False)
 
 class ClienteTestORM(Base):
-    __tablename__ = 'clientes_afip' # Mapea la tabla existente
+    __tablename__ = 'clientes_afip' 
     id = Column(Integer, primary_key=True)
     cuit = Column(String(11))
     razon_social = Column(String(255))
@@ -107,29 +110,30 @@ class ClienteTestORM(Base):
 class UsuarioClienteTestORM(Base):
     __tablename__ = 'usuario_cliente_test'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('user_test.id')) 
-    cliente_id = Column(Integer, ForeignKey('clientes_afip.id')) 
+    user_id = Column(Integer)
+    cliente_id = Column(Integer)
     __table_args__ = (UniqueConstraint('user_id', 'cliente_id', name='_user_cliente_test_uc'),)
 
 
 def ensure_db_tables_exist():
-    # NOTA: La lógica de inserción de datos se ha eliminado ya que lo hiciste manualmente con SQL.
-    # Solo chequea si las tablas existen para no fallar.
-    
-    engine = create_engine(DB_URL_TEST)
-    inspector = Inspector.from_engine(engine)
-    
-    if 'user_test' not in inspector.get_table_names() or 'usuario_cliente_test' not in inspector.get_table_names():
-        print("ADVERTENCIA: Tablas de prueba incompletas. La aplicación puede fallar si no se insertaron usuarios y relaciones manualmente.")
-    else:
-        print("✅ Tablas de prueba (user_test, usuario_cliente_test) existen.")
+    """Función que comprueba la existencia de tablas al inicio de la app."""
+    try:
+        engine = create_engine(DB_URL_TEST_SQLA)
+        inspector = Inspector.from_engine(engine)
+        
+        if 'user_test' not in inspector.get_table_names() or 'usuario_cliente_test' not in inspector.get_table_names():
+            print("ADVERTENCIA: Tablas de prueba incompletas. Asegúrese de haberlas creado e insertado datos.")
+        else:
+            print("✅ Tablas de prueba (user_test, usuario_cliente_test) existen.")
+    except Exception as e:
+        print(f"🛑 ERROR CRÍTICO DE CONEXIÓN AL INICIO (ensure_db_tables_exist): {e}")
 
 # Ejecutar la inicialización automáticamente al inicio
-ensure_db_tables_exist()
+ensure_db_tables_exist() 
 
 
 # =================================================================
-#                         RUTAS DE FLASK (USAN PYMYSQL)
+#                         RUTAS DE FLASK 
 # =================================================================
 
 @app.route('/login_prueba', methods=['GET', 'POST']) 
@@ -156,7 +160,6 @@ def login_prueba():
                 password_hash_str = user_data['password_hash'].decode('utf-8') if isinstance(user_data['password_hash'], bytes) else user_data['password_hash']
 
                 if check_password_hash(password_hash_str, password):
-                    # Convertimos is_admin a bool
                     is_admin_bool = bool(user_data['is_admin']) if isinstance(user_data['is_admin'], int) else user_data['is_admin']
                     
                     user = User(id=user_data['id'], username=user_data['username'], is_admin=is_admin_bool)
@@ -170,7 +173,6 @@ def login_prueba():
                  flash('Credenciales inválidas. Por favor, inténtelo de nuevo.', 'error')
                 
         except Exception as e:
-            # Imprimimos el error real en los logs de Render para depuración
             print(f"--- ERROR CRÍTICO EN LOGIN ---: {e}") 
             flash('Error interno en la autenticación. Consulte los logs de Render.', 'error')
         finally:
