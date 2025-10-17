@@ -190,7 +190,7 @@ def consultar_cuit_afip(cuit_consultado_str):
                 if persona is None:
                     return None, f"CUIT {cuit_consultado_str} no encontrado o sin datos."
                 
-                # Líneas de DIAGNÓSTICO AÑADIDAS
+                # Líneas de DIAGNÓSTICO
                 print("--- INICIO DIAGNÓSTICO AFIP (Zeep) ---")
                 print(serialize_object(persona))
                 print("--- FIN DIAGNÓSTICO AFIP (Zeep) ---")
@@ -363,16 +363,20 @@ def format_afip_result_html(persona, cuit):
 
 
     # =================================================================
-    # DATOS DEL RÉGIMEN GENERAL (Incluye Jurídicas y Monotributistas con IIBB/Municipales)
+    # DATOS DEL RÉGIMEN GENERAL (Incluye Jurídicas y Autónomos/Monotributistas)
     # =================================================================
     
+    # 🟢 CORRECCIÓN: Obtener el objeto que contiene las listas de detalle
+    datos_regimen_general = getattr(persona, 'datosRegimenGeneral', None)
+    
     # --------------------------- IMPUESTOS ---------------------------
-    # Nota: Los campos se buscan en el nivel principal del objeto 'persona' ya que Zeep lo aplana
-    impuestos_list = getattr(getattr(persona, 'impuestos', None), 'impuesto', [])
+    # Se extrae la lista de impuestos del objeto 'datosRegimenGeneral' (si existe)
+    impuestos_list = getattr(datos_regimen_general, 'impuesto', []) if datos_regimen_general else []
     
     if impuestos_list:
         html += f"<h3>Impuestos (Inscripciones)</h3>"
 
+        # Asegurar que sea una lista si Zeep devuelve un solo elemento sin envolver
         if not isinstance(impuestos_list, list):
             impuestos_list = [impuestos_list]
 
@@ -380,8 +384,8 @@ def format_afip_result_html(persona, cuit):
             html += f"<p>- ID {getattr(imp, 'idImpuesto', '—')}: {getattr(imp, 'descripcionImpuesto', '—')}</p>"
 
     # --------------------------- ACTIVIDADES ---------------------------
-    # Nota: Los campos se buscan en el nivel principal del objeto 'persona' ya que Zeep lo aplana
-    actividades_list = getattr(getattr(persona, 'actividades', None), 'actividad', [])
+    # Se extrae la lista de actividades del objeto 'datosRegimenGeneral' (si existe)
+    actividades_list = getattr(datos_regimen_general, 'actividad', []) if datos_regimen_general else []
     
     if actividades_list:
         html += f"<h3>Actividades</h3>"
@@ -394,8 +398,8 @@ def format_afip_result_html(persona, cuit):
             html += f"<p>- Cód. {getattr(act, 'idActividad', '—')}: {getattr(act, 'descripcionActividad', '—')}{principal}</p>"
 
     # --------------------------- REGIMENES (RET/PER) ---------------------------
-    # Nota: Los campos se buscan en el nivel principal del objeto 'persona' ya que Zeep lo aplana
-    regimenes_list = getattr(getattr(persona, 'regimenes', None), 'regimen', [])
+    # Se extrae la lista de regimenes del objeto 'datosRegimenGeneral' (si existe)
+    regimenes_list = getattr(datos_regimen_general, 'regimen', []) if datos_regimen_general else []
     
     if regimenes_list:
         html += f"<h3>Otros Regímenes (Retenciones/Percepciones)</h3>"
