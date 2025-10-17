@@ -1,0 +1,65 @@
+{% extends "layout.html" %}
+
+{% block title %}Asignar Clientes{% endblock %}
+
+{% block content %}
+<h2>Asignación de Clientes a Usuarios (ADMIN TEST)</h2>
+
+<div class="flash info">
+    Esta interfaz simula la asignación de clientes de la tabla `clientes_afip` a usuarios de la tabla `user_test` a través de la tabla de relación `usuario_cliente_test`.
+    <p><strong>REQUISITO:</strong> Necesitas cargar el script de Select2 en tu `layout.html` para que los selectores funcionen correctamente.</p>
+</div>
+
+{% if users %}
+    {% for user in users %}
+    <div style="border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; border-radius: 6px;">
+        <h3>Usuario: {{ user.username }} (ID: {{ user.id }}) 
+            {% if user.is_admin %}
+                <span style="color: #3f51b5; font-size: 0.9rem;">(ADMIN)</span>
+            {% endif %}
+        </h3>
+        
+        <form method="POST" action="{{ url_for('asignar_clientes') }}">
+            <input type="hidden" name="user_id" value="{{ user.id }}">
+
+            <div class="form-group">
+                <label for="select-{{ user.id }}">Clientes Asignados:</label>
+                <!-- El atributo multiple="multiple" y Select2 permiten la selección de varios clientes -->
+                <select id="select-{{ user.id }}" name="clientes_asignados" multiple="multiple" style="width: 100%;">
+                    {% set assigned_ids = relaciones_actuales.get(user.id, []) %}
+                    {% for cliente in clientes %}
+                        <option value="{{ cliente.id }}" 
+                                {% if cliente.id in assigned_ids %}selected{% endif %}>
+                            {{ cliente.razon_social }} (CUIT: {{ cliente.cuit }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="form-group" style="text-align: right; margin-top: 15px;">
+                <button type="submit" class="btn btn-primary">Guardar Asignaciones</button>
+            </div>
+        </form>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="flash error">
+        No se encontraron usuarios en la tabla `user_test`.
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<!-- Script para inicializar Select2. Asumimos que Select2.js y CSS están cargados en layout.html -->
+<script>
+    // Inicializar Select2 en todos los selectores múltiples de clientes
+    $(document).ready(function() {
+        $('select[name="clientes_asignados"]').select2({
+            placeholder: "Selecciona clientes...",
+            closeOnSelect: false,
+            allowClear: true // Permite limpiar la selección
+        });
+    });
+</script>
+{% endblock %}
