@@ -7,6 +7,7 @@ import pathlib
 import sys
 import base64
 import pymysql.cursors 
+import json # 🟢 NUEVA IMPORTACIÓN para el logging
 from xml.etree import ElementTree as ET
 
 # Librerías necesarias para la migración y web
@@ -32,7 +33,6 @@ SERVICE_ID = "ws_sr_constancia_inscripcion"
 CLAVES_FILE = pathlib.Path(__file__).parent / "claves.xlsx"
 
 # --- Configuración de Base de Datos (Desde Variables de Entorno de Render) ---
-# Asegúrate de que estas variables de entorno estén configuradas en Render con tus credenciales de Hostinger
 DB_HOST = os.environ.get("DB_HOST", "srv1591.hstgr.io") 
 DB_USER = os.environ.get("DB_USER", "tu_usuario_hostinger") 
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "tu_contraseña_hostinger") 
@@ -190,11 +190,6 @@ def consultar_cuit_afip(cuit_consultado_str):
                 if persona is None:
                     return None, f"CUIT {cuit_consultado_str} no encontrado o sin datos."
                 
-                # Líneas de DIAGNÓSTICO (Opcional, se puede comentar para producción)
-                # print("--- INICIO DIAGNÓSTICO AFIP (Zeep) ---")
-                # print(serialize_object(persona))
-                # print("--- FIN DIAGNÓSTICO AFIP (Zeep) ---")
-
                 return persona, "Datos obtenidos (pendiente de formatear nombre en HTML)"
 
             except subprocess.CalledProcessError as e:
@@ -307,8 +302,7 @@ def load_data_from_excel():
 
 def format_afip_result_html(persona, cuit):
     """
-    Formatea la respuesta del servicio AFIP a una cadena HTML legible,
-    incluyendo Domicilio, Monotributo, Actividades, Impuestos y Regímenes.
+    Formatea la respuesta del servicio AFIP a una cadena HTML legible.
     """
     if persona is None: return "No se recibieron datos de AFIP."
     
@@ -347,76 +341,83 @@ def format_afip_result_html(persona, cuit):
         html += f"<p><strong>CP:</strong> {getattr(dom, 'codPostal', '—')}</p>"
         
     # =================================================================
-    # DATOS DEL MONOTRIBUTO (Si existen)
+    # DATOS DEL MONOTRIBUTO (Si existen) - BLOQUE DE CONTROL Y LÓGICA
     # =================================================================
     datos_monotributo = getattr(persona, 'datosMonotributo', None)
     
-    desc_cat = '' 
+    desc_cat = ''
     
     if datos_monotributo:
-        # 1. Intentar obtener la descripción de la categoría directamente del nodo principal (y limpiar)
+        # 🟢 BLOQUE DE CONTROL DE LOGS: Volcado de la estructura de Monotributo
+        try:
+            # Convertir el objeto Zeep a un diccionario serializable para el log
+            monotributo_log_data = serialize_object(datos_monotributo)
+            
+            # Loguear la estructura de datos del Monotributo
+            log_message = f"\n--- INICIO LOG MONOTRIBUTO CUIT: {cuit} ---\n"
+            # Usamos json.dumps para formatear la salida como JSON legible
+            log_message += json.dumps(monotributo_log_data, indent=2, ensure_ascii=False)
+            log_message += f"\n--- FIN LOG MONOTRIBUTO CUIT: {cuit} ---\n"
+            
+            # app.logger.info es el método estándar para logs en Flask/Render
+            app.logger.info(log_message)
+        except Exception as e:
+            app.logger.error(f"Error al serializar el objeto Monotributo para log: {e}")
+        # 🟢 FIN BLOQUE DE CONTROL DE LOGS
+
+        # LÓGICA ROBUSTA PARA OBTENER LA CATEGORÍA (MANTENIDA)
+        # 1. Intentar obtener la descripción de la categoría directamente del nodo principal
         desc_cat = str(getattr(datos_monotributo, 'descripcionCategoria', '')).strip()
         
+        # Si no se encontró en el nodo principal, buscar en el nodo anidado
         if not desc_cat:
-            # 2. Si no está en el nodo principal, buscar en el nodo anidado
             categoria = getattr(datos_monotributo, 'categoriaMonotributo', None)
             if categoria:
-                # 3. Obtener del nodo anidado (y limpiar)
+                # 2. Buscar en el camino 'descripcionCategoriaMonotributo' (el más largo)
                 desc_cat = str(getattr(categoria, 'descripcionCategoriaMonotributo', '')).strip()
                 
-        # Solo generar el HTML si la descripción (limpia) no está vacía
+                # 3. Si sigue sin aparecer, buscar en el camino 'descripcionCategoria' (el que sugería su bloque)
+                if not desc_cat:
+                    desc_cat = str(getattr(categoria, 'descripcionCategoria', '')).strip()
+
+        # Generar el HTML solo si la descripción (limpia) no está vacía
         if desc_cat:
             html += f"<h3>Datos del Monotributo</h3>"
             html += f"<p><strong>CATEGORÍA:</strong> {desc_cat}</p>"
 
 
     # =================================================================
-    # DATOS DEL RÉGIMEN GENERAL (Incluye Jurídicas y Autónomos/Monotributistas)
+    # DATOS DEL RÉGIMEN GENERAL (Resto de la lógica se mantiene)
     # =================================================================
     
-    # Obtener el objeto que contiene las listas de detalle
     datos_regimen_general = getattr(persona, 'datosRegimenGeneral', None)
     
     # --------------------------- IMPUESTOS ---------------------------
-    # Se extrae la lista de impuestos del objeto 'datosRegimenGeneral' (si existe)
     impuestos_list = getattr(datos_regimen_general, 'impuesto', []) if datos_regimen_general else []
     
     if impuestos_list:
         html += f"<h3>Impuestos (Inscripciones)</h3>"
-
-        # Asegurar que sea una lista si Zeep devuelve un solo elemento sin envolver
-        if not isinstance(impuestos_list, list):
-            impuestos_list = [impuestos_list]
-
+        if not isinstance(impuestos_list, list): impuestos_list = [impuestos_list]
         for imp in impuestos_list:
             html += f"<p>- ID {getattr(imp, 'idImpuesto', '—')}: {getattr(imp, 'descripcionImpuesto', '—')}</p>"
 
     # --------------------------- ACTIVIDADES ---------------------------
-    # Se extrae la lista de actividades del objeto 'datosRegimenGeneral' (si existe)
     actividades_list = getattr(datos_regimen_general, 'actividad', []) if datos_regimen_general else []
     
     if actividades_list:
         html += f"<h3>Actividades</h3>"
-        
-        if not isinstance(actividades_list, list):
-            actividades_list = [actividades_list]
-
+        if not isinstance(actividades_list, list): actividades_list = [actividades_list]
         for act in actividades_list:
             principal = ' (Principal)' if getattr(act, 'periodo', '') else ''
             html += f"<p>- Cód. {getattr(act, 'idActividad', '—')}: {getattr(act, 'descripcionActividad', '—')}{principal}</p>"
 
     # --------------------------- REGIMENES (RET/PER) ---------------------------
-    # Se extrae la lista de regimenes del objeto 'datosRegimenGeneral' (si existe)
     regimenes_list = getattr(datos_regimen_general, 'regimen', []) if datos_regimen_general else []
     
     if regimenes_list:
         html += f"<h3>Otros Regímenes (Retenciones/Percepciones)</h3>"
-
-        if not isinstance(regimenes_list, list):
-            regimenes_list = [regimenes_list]
-
+        if not isinstance(regimenes_list, list): regimenes_list = [regimenes_list]
         for reg in regimenes_list:
-            # La AFIP a veces envía 'idRegimen' y a veces 'id'
             reg_id = getattr(reg, 'idRegimen', None) or getattr(reg, 'id', '—')
             html += f"<p>- ID {reg_id}: {getattr(reg, 'descripcionRegimen', '—')}</p>"
             
@@ -447,7 +448,6 @@ def index():
             else:
                 consulta_cuit = cuit_consulta
                 
-                # --- Lógica para obtener el nombre/razón social (para flash y DB) ---
                 dg = getattr(persona_data, 'datosGenerales', None)
                 if dg:
                     razon_social_temp = getattr(dg, 'razonSocial', "")
@@ -470,10 +470,8 @@ def index():
                                         cuit_consultado=consulta_cuit,
                                         error_message=error_message)
 
-                # Pre-formatear el resultado para la web
                 resultado_html = format_afip_result_html(persona_data, cuit_consulta)
                 
-                # Si se solicitó guardar el cliente
                 if request.form.get('guardar_cliente'):
                     if save_client_to_db(consulta_cuit, razon_social):
                         flash(f"Cliente {razon_social} ({cuit_consulta}) guardado exitosamente.", 'success')
@@ -498,7 +496,6 @@ def index():
 @app.route('/gestion_claves', methods=['GET', 'POST'])
 @app.route('/gestion_claves/<cuit>', methods=['GET', 'POST'])
 def gestion_claves(cuit=None):
-    # Se modifica para aceptar 'cuit' como parámetro de la URL (GET) o del formulario (POST)
     if request.method == 'POST' and request.form.get('cuit'):
         cuit = request.form.get('cuit')
     elif request.method == 'GET' and request.args.get('cuit'):
@@ -514,7 +511,6 @@ def gestion_claves(cuit=None):
     
     try:
         with conn.cursor() as cursor:
-            # Seleccionar solo CUIT y Razon Social para el Select2
             cursor.execute("SELECT cuit, razon_social FROM clientes_afip ORDER BY razon_social")
             clientes = cursor.fetchall()
             
@@ -549,7 +545,6 @@ def gestion_claves(cuit=None):
                     flash("Clave eliminada.", 'success')
                 
                 conn.commit()
-                # Redirige con el CUIT para mantener la vista seleccionada
                 return redirect(url_for('gestion_claves', cuit=cuit))
 
     except Exception as e:
