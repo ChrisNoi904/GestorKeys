@@ -14,7 +14,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 from zeep import Client
 from zeep.transports import Transport
 from openpyxl import load_workbook
-from zeep.helpers import serialize_object # Importación necesaria para el diagnóstico
+from zeep.helpers import serialize_object 
 
 # =================================================================
 #                         CONFIGURACIÓN Y GLOBALES
@@ -190,11 +190,10 @@ def consultar_cuit_afip(cuit_consultado_str):
                 if persona is None:
                     return None, f"CUIT {cuit_consultado_str} no encontrado o sin datos."
                 
-                # Líneas de DIAGNÓSTICO
-                print("--- INICIO DIAGNÓSTICO AFIP (Zeep) ---")
-                print(serialize_object(persona))
-                print("--- FIN DIAGNÓSTICO AFIP (Zeep) ---")
-                # FIN Líneas de DIAGNÓSTICO
+                # Líneas de DIAGNÓSTICO (Opcional, se puede comentar para producción)
+                # print("--- INICIO DIAGNÓSTICO AFIP (Zeep) ---")
+                # print(serialize_object(persona))
+                # print("--- FIN DIAGNÓSTICO AFIP (Zeep) ---")
 
                 return persona, "Datos obtenidos (pendiente de formatear nombre en HTML)"
 
@@ -353,12 +352,17 @@ def format_afip_result_html(persona, cuit):
     datos_monotributo = getattr(persona, 'datosMonotributo', None)
     
     if datos_monotributo:
-        categoria = getattr(datos_monotributo, 'categoriaMonotributo', None)
+        # 🟢 CORRECCIÓN: Intentar obtener la descripción de la categoría directamente del nodo principal
+        desc_cat = getattr(datos_monotributo, 'descripcionCategoria', None)
         
-        if categoria:
+        if not desc_cat:
+            # Si no está en el nodo principal, buscar en el nodo anidado (para compatibilidad)
+            categoria = getattr(datos_monotributo, 'categoriaMonotributo', None)
+            if categoria:
+                desc_cat = getattr(categoria, 'descripcionCategoriaMonotributo', '')
+                
+        if desc_cat:
             html += f"<h3>Datos del Monotributo</h3>"
-            # Se usa el campo descripcionCategoriaMonotributo si está disponible
-            desc_cat = getattr(categoria, 'descripcionCategoriaMonotributo', '')
             html += f"<p><strong>CATEGORÍA:</strong> {desc_cat}</p>"
 
 
@@ -366,7 +370,7 @@ def format_afip_result_html(persona, cuit):
     # DATOS DEL RÉGIMEN GENERAL (Incluye Jurídicas y Autónomos/Monotributistas)
     # =================================================================
     
-    # 🟢 CORRECCIÓN: Obtener el objeto que contiene las listas de detalle
+    # Obtener el objeto que contiene las listas de detalle
     datos_regimen_general = getattr(persona, 'datosRegimenGeneral', None)
     
     # --------------------------- IMPUESTOS ---------------------------
