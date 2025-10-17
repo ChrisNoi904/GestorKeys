@@ -14,7 +14,6 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 from zeep import Client
 from zeep.transports import Transport
 from openpyxl import load_workbook
-# Ya no es necesario importar pytz si usamos .utcnow()
 
 # =================================================================
 #                         CONFIGURACIÓN Y GLOBALES
@@ -134,12 +133,14 @@ def consultar_cuit_afip(cuit_consultado_str):
             tmp_key.close()
 
             # --- 1. CREAR LoginTicketRequest ---
-            # ✅ SOLUCIÓN AL ERROR: Usar UTC para evitar el error de generationTime 
-            # (la AFIP usa UTC y el servidor local usa hora local)
+            # ✅ CORRECCIÓN FINAL: Usar UTC, margen reducido y sufijo 'Z' para formato ISO 8601
             ahora_utc = datetime.datetime.utcnow() 
-            # Se permite una antigüedad máxima de 24hs, 10 minutos es un margen seguro.
-            generation_time = (ahora_utc - datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
-            expiration_time = (ahora_utc + datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
+            
+            # 1 minuto de margen hacia el pasado (GenerationTime). Margen pequeño para evitar la antigüedad.
+            # Se añade 'Z' al final de la cadena de tiempo para indicar UTC de forma explícita.
+            generation_time = (ahora_utc - datetime.timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+            # 10 minutos de margen hacia el futuro (ExpirationTime)
+            expiration_time = (ahora_utc + datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
 
             login_ticket = f"""<?xml version="1.0" encoding="UTF-8"?>
 <loginTicketRequest version="1.0">
