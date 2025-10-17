@@ -2,73 +2,155 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>{% block title %}Gestor AFIP Cloud{% endblock %}</title>
-    
-    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Gestor de Claves AFIP{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f9; }
-        .container { width: 90%; max-width: 1100px; margin: 20px auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        .header { background-color: #3f51b5; color: white; padding: 15px; border-radius: 8px 8px 0 0; }
-        .nav a { color: white; margin-right: 15px; text-decoration: none; font-weight: bold; }
-        .flash { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
-        .flash.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .flash.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .flash.info { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
-        .form-group { margin-bottom: 15px; }
-        /* Ajustamos el estilo para los inputs */
-        input[type="text"], input[type="password"], select, input[type="date"], .select2-container { 
-            width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; 
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding-top: 60px; /* Espacio para el header fijo */
         }
-        /* Corregimos el padding del select nativo (y Select2 lo usa para simular el control) */
-        select { padding: 10px; } 
-
-        button, .btn { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; color: white; text-decoration: none; display: inline-block; }
-        .btn-primary { background-color: #3f51b5; }
-        .btn-success { background-color: #4CAF50; }
-        .btn-danger { background-color: #f44336; }
-        .btn-info { background-color: #00bcd4; }
-        h2 { border-bottom: 2px solid #ccc; padding-bottom: 5px; margin-top: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-
-        /* Ajustes específicos para que Select2 se vea bien con el estilo personalizado */
-        .select2-container .select2-selection--single {
-            height: 38px !important;
-            border: 1px solid #ccc !important;
+        .header {
+            background-color: #0056b3;
+            color: white;
+            padding: 15px 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        .select2-container--default .select2-selection--single .select2-selection__rendered {
-            line-height: 18px !important; /* Ajuste para centrar texto */
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
         }
-        .select2-container--default .select2-selection--single .select2-selection__arrow {
-            height: 36px !important;
+        .nav a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+            margin-left: 10px;
+        }
+        .nav a:hover {
+            background-color: #004080;
+        }
+        .main-content {
+            padding: 20px;
+            max-width: 1200px;
+            margin: 20px auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+        }
+        .flash {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+        .flash.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .flash.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .flash.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .flash.warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        
+        .btn-delete {
+            background-color: #dc3545;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+        }
+        .btn-delete:hover {
+            background-color: #c82333;
+        }
+        .btn-add {
+            background-color: #28a745;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+        }
+        .btn-add:hover {
+            background-color: #1e7e34;
+        }
+        .text-danger {
+            color: #dc3545;
+            font-weight: 600;
+        }
+        /* Estilo para tablas */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .data-table th, .data-table td {
+            border: 1px solid #e2e8f0;
+            padding: 12px;
+            text-align: left;
+        }
+        .data-table th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: #4a5568;
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Gestor AFIP Cloud</h1>
-        <div class="nav">
-            <a href="{{ url_for('index') }}">Consulta AFIP</a>
-            <a href="{{ url_for('gestion_claves') }}">Gestión de Claves</a>
-            <a href="{{ url_for('gestion_certificados') }}">Certificados AFIP</a>
+        <h1>Gestor de Claves AFIP</h1>
+        <div class="nav flex items-center">
+            {% if current_user.is_authenticated %}
+                <a href="{{ url_for('index') }}">Consulta AFIP</a>
+                <a href="{{ url_for('gestion_claves') }}">Gestión de Claves</a>
+                <a href="{{ url_for('gestion_certificados') }}">Certificados AFIP</a>
+                
+                <!-- Enlace de Logout -->
+                <span class="text-sm font-semibold ml-4 mr-2">
+                    {{ current_user.username }}
+                </span>
+                <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-700">
+                    Cerrar Sesión
+                </a> 
+            {% endif %}
         </div>
     </div>
-    <div class="container">
+    
+    <div class="main-content">
+        <!-- Flash Messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
+                <ul class="list-none p-0">
                 {% for category, message in messages %}
-                    <div class="flash {{ category }}">{{ message }}</div>
+                    <li class="flash {{ category }}">{{ message }}</li>
                 {% endfor %}
+                </ul>
             {% endif %}
         {% endwith %}
+        
         {% block content %}{% endblock %}
     </div>
-
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-    
-    {% block scripts %}{% endblock %}
 </body>
 </html>
