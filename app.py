@@ -351,16 +351,22 @@ def format_afip_result_html(persona, cuit):
     # =================================================================
     datos_monotributo = getattr(persona, 'datosMonotributo', None)
     
+    desc_cat = '' # Inicializamos con cadena vacía
+    
     if datos_monotributo:
-        # 🟢 CORRECCIÓN: Intentar obtener la descripción de la categoría directamente del nodo principal
-        desc_cat = getattr(datos_monotributo, 'descripcionCategoria', None)
+        # 1. Intentar obtener la descripción de la categoría directamente del nodo principal (y limpiar)
+        # Esto soluciona el caso 20230369322
+        desc_cat = str(getattr(datos_monotributo, 'descripcionCategoria', '')).strip()
         
         if not desc_cat:
-            # Si no está en el nodo principal, buscar en el nodo anidado (para compatibilidad)
+            # 2. Si no está en el nodo principal, buscar en el nodo anidado (para compatibilidad)
+            # Esto soluciona casos donde la info está anidada
             categoria = getattr(datos_monotributo, 'categoriaMonotributo', None)
             if categoria:
-                desc_cat = getattr(categoria, 'descripcionCategoriaMonotributo', '')
+                # 3. Obtener del nodo anidado (y limpiar)
+                desc_cat = str(getattr(categoria, 'descripcionCategoriaMonotributo', '')).strip()
                 
+        # 🟢 CORRECCIÓN FINAL: Solo generar el HTML si la descripción (limpia) no está vacía
         if desc_cat:
             html += f"<h3>Datos del Monotributo</h3>"
             html += f"<p><strong>CATEGORÍA:</strong> {desc_cat}</p>"
