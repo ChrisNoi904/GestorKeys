@@ -3,6 +3,7 @@ import pymysql.cursors
 import json 
 import datetime
 import pathlib 
+import logging # Importación necesaria para configurar el logging
 
 # --- IMPORTACIONES DE SEGURIDAD Y WEB ---
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -16,6 +17,16 @@ from sqlalchemy.engine.reflection import Inspector
 # -----------------------------------------------------------------------------------------
 
 app = Flask(__name__)
+
+# =================================================================
+#                 CONFIGURACIÓN DE LOGGING (NIVEL DEBUG)
+# =================================================================
+# Esto asegura que todos los mensajes de error y debug se registren.
+app.logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+handler.setLevel(logging.DEBUG)
+app.logger.addHandler(handler)
+# =================================================================
 
 # =================================================================
 #                         CONFIGURACIÓN Y GLOBALES
@@ -57,6 +68,7 @@ class User(UserMixin):
 def get_db_connection():
     """Establece la conexión a la base de datos usando argumentos directos."""
     try:
+        app.logger.debug(f"Intentando conectar a DB: {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
         return pymysql.connect(
             host=DB_HOST,
             user=DB_USER,
@@ -66,8 +78,8 @@ def get_db_connection():
             cursorclass=pymysql.cursors.DictCursor
         )
     except pymysql.Error as e:
-        print(f"🛑 ERROR DE CONEXIÓN A DB (get_db_connection): {e}")
-        # Relanzamos la excepción para que Flask capture el error
+        app.logger.error(f"🛑 ERROR CRÍTICO DE CONEXIÓN A DB (pymysql.Error): {e}")
+        # Relanzamos la excepción para que Flask capture el error 500
         raise
 
 
@@ -85,12 +97,11 @@ def load_user(user_id):
         user_data = cursor.fetchone()
 
         if user_data:
-            # Manejo de is_admin si viene como TINYINT (0 o 1)
             is_admin_bool = bool(user_data['is_admin']) if isinstance(user_data['is_admin'], int) else user_data['is_admin']
             user = User(id=user_data['id'], username=user_data['username'], is_admin=is_admin_bool)
         return user
     except Exception as e:
-        print(f"Error al cargar usuario de prueba (load_user): {e}") 
+        app.logger.error(f"Error al cargar usuario de prueba (load_user): {e}") 
         return None
     finally:
         if cursor: cursor.close()
@@ -128,6 +139,7 @@ class UsuarioClienteTestORM(Base):
 def ensure_db_tables_exist():
     """Función que comprueba la existencia de tablas."""
     try:
+        app.logger.debug("Iniciando chequeo de existencia de tablas de prueba...")
         engine = create_engine(DB_URL_TEST_SQLA)
         inspector = Inspector.from_engine(engine)
         
@@ -140,12 +152,12 @@ def ensure_db_tables_exist():
             missing_tables.append('usuario_cliente_test')
 
         if missing_tables:
-            print(f"ADVERTENCIA: Faltan tablas de prueba: {', '.join(missing_tables)}. Asegúrese de crearlas manualmente.")
+            app.logger.warning(f"ADVERTENCIA: Faltan tablas de prueba: {', '.join(missing_tables)}. Asegúrese de crearlas manualmente.")
         else:
-            print("✅ Tablas de prueba (user_test, usuario_cliente_test) existen.")
+            app.logger.info("✅ Tablas de prueba (user_test, usuario_cliente_test) existen.")
     except Exception as e:
-        # Se imprime el error sin lanzar la excepción para no detener Flask
-        print(f"🛑 ERROR DE CONEXIÓN DURANTE EL CHEQUEO DE TABLAS: {e}")
+        # Registra el error de conexión si ocurre aquí, pero no detiene la ejecución
+        app.logger.error(f"🛑 ERROR DE CONEXIÓN DURANTE EL CHEQUEO DE TABLAS (SQLAlchemy): {e}")
 
 # Usamos before_request con una bandera para simular el comportamiento de before_first_request
 @app.before_request
@@ -155,6 +167,7 @@ def before_request_check():
     if not APP_INITIALIZED:
         ensure_db_tables_exist()
         APP_INITIALIZED = True
+        app.logger.info("Aplicación inicializada y chequeo de tablas completado.")
 
 
 # =================================================================
@@ -181,7 +194,6 @@ def login_prueba():
             user_data = cursor.fetchone()
 
             if user_data:
-                # FIX CRÍTICO: Aseguramos que el hash sea string para la verificación
                 password_hash_str = user_data['password_hash'].decode('utf-8') if isinstance(user_data['password_hash'], bytes) else user_data['password_hash']
 
                 if check_password_hash(password_hash_str, password):
@@ -189,16 +201,19 @@ def login_prueba():
                     
                     user = User(id=user_data['id'], username=user_data['username'], is_admin=is_admin_bool)
                     login_user(user)
+                    app.logger.info(f"Usuario {username} ha iniciado sesión con éxito.")
                     flash(f'¡Bienvenido, {username}!', 'success')
                     next_page = request.args.get('next')
                     return redirect(next_page or url_for('gestion_claves')) 
                 else:
                     flash('Credenciales inválidas. Por favor, inténtelo de nuevo.', 'error')
+                    app.logger.warning(f"Intento fallido de login para usuario: {username} (Contraseña incorrecta).")
             else:
                  flash('Credenciales inválidas. Por favor, inténtelo de nuevo.', 'error')
+                 app.logger.warning(f"Intento fallido de login para usuario: {username} (Usuario no encontrado).")
                 
         except Exception as e:
-            print(f"--- ERROR CRÍTICO EN LOGIN ---: {e}") 
+            app.logger.critical(f"--- ERROR CRÍTICO EN LOGIN (Ruta) ---: {e}") 
             flash('Error interno en la autenticación. Consulte los logs de Render.', 'error')
         finally:
             if cursor: cursor.close()
@@ -210,6 +225,7 @@ def login_prueba():
 @app.route('/logout')
 @login_required
 def logout():
+    app.logger.info(f"Usuario {current_user.username} ha cerrado la sesión.")
     logout_user()
     flash('Sesión cerrada correctamente.', 'info')
     return redirect(url_for('login_prueba'))
@@ -217,7 +233,6 @@ def logout():
 
 @app.route('/')
 def index():
-    # Redirigimos al login
     return redirect(url_for('login_prueba'))
 
 
@@ -240,9 +255,11 @@ def gestion_claves():
             cursor.execute(sql)
             clientes = cursor.fetchall()
             filtro_aplicado = "NINGUNO (Acceso total a clientes_afip)"
+            app.logger.debug(f"Gestión de claves: Usuario {usuario_actual} es Admin. Cargando {len(clientes)} clientes.")
         else:
             # 2. CASO LUNA (Usuario Restringido): Lógica de filtrado
             filtro_aplicado = f"ASIGNADOS (Filtro por user_id={current_user.id} en usuario_cliente_test)"
+            app.logger.debug(f"Gestión de claves: Usuario {usuario_actual} es restringido. Aplicando filtro.")
             
             # SQL que une la tabla de clientes original con la tabla de relación de PRUEBA
             sql = """
@@ -257,9 +274,10 @@ def gestion_claves():
             """
             cursor.execute(sql, (current_user.id,))
             clientes = cursor.fetchall()
+            app.logger.debug(f"Gestión de claves: Usuario {usuario_actual} cargó {len(clientes)} clientes asignados.")
             
     except Exception as e:
-        print(f"Error al cargar clientes en gestion_claves: {e}") 
+        app.logger.error(f"Error al cargar clientes en gestion_claves: {e}") 
         flash('Error al cargar la lista de clientes.', 'error')
     finally:
         if cursor: cursor.close()
@@ -304,6 +322,7 @@ def get_user_client_relations(conn):
 @login_required
 def asignar_clientes():
     if not current_user.is_admin:
+        app.logger.warning(f"Acceso denegado a asignación de clientes para usuario: {current_user.username}")
         flash("Acceso denegado. Se requiere ser administrador.", 'error')
         return redirect(url_for('gestion_claves'))
 
@@ -315,12 +334,15 @@ def asignar_clientes():
 
         if request.method == 'POST':
             user_id_to_update = request.form.get('user_id')
+            clientes_asignados = request.form.getlist('clientes_asignados')
+            
             if user_id_to_update:
+                app.logger.info(f"Actualizando permisos para user ID {user_id_to_update}. Asignados: {len(clientes_asignados)}")
+                
                 # 1. ELIMINAR asignaciones previas
                 cursor.execute("DELETE FROM usuario_cliente_test WHERE user_id = %s", (user_id_to_update,))
                 
                 # 2. INSERTAR nuevas asignaciones
-                clientes_asignados = request.form.getlist('clientes_asignados')
                 for cliente_id in clientes_asignados:
                     sql_insert = """
                         INSERT INTO usuario_cliente_test (user_id, cliente_id) 
@@ -341,7 +363,7 @@ def asignar_clientes():
         relaciones_actuales = get_user_client_relations(conn)
         
     except Exception as e:
-        print(f"Error en la ruta /asignar_clientes: {e}") 
+        app.logger.error(f"Error en la ruta /asignar_clientes: {e}") 
         flash('Error al cargar la interfaz de administración.', 'error')
         users = []
         clientes = []
