@@ -6,11 +6,12 @@
     <h2>Gestión de Claves por Cliente</h2>
 
     <div class="form-group">
-        <label for="cuit_select">Seleccionar Cliente:</label>
-        <select id="cuit_select" onchange="window.location.href = '/gestion_claves/' + this.value">
+        <label for="cliente_selector">Seleccionar Cliente:</label>
+        
+        <select id="cliente_selector" onchange="window.location.href = '/gestion_claves/' + this.value">
             <option value="">-- Seleccione un CUIT --</option>
             {% for cliente in clientes %}
-                <option value="{{ cliente.cuit }}" {% if cuit_seleccionado == cliente.cuit %}selected{% endif %}>
+                <option value="{{ cliente.cuit }}" {% if cuit_seleccionado == cliente.cuit|string %}selected{% endif %}>
                     {{ cliente.razon_social }} ({{ cliente.cuit }})
                 </option>
             {% endfor %}
@@ -69,9 +70,9 @@
         <form method="POST">
             <input type="hidden" name="action" value="add">
             <div class="form-group">
-                <label>Descripción:</label><input type="text" name="desc" required>
-                <label>Usuario:</label><input type="text" name="user" required>
-                <label>Clave:</label><input type="password" name="pw" required>
+                <input type="text" name="desc" placeholder="Descripción" required>
+                <input type="text" name="user" placeholder="Usuario" required>
+                <input type="password" name="pw" placeholder="Clave" required>
             </div>
             <button type="submit" class="btn btn-success">Guardar Nueva Clave</button>
         </form>
@@ -92,4 +93,17 @@
     {% else %}
         <p class="flash info">Por favor, seleccione un cliente de la lista.</p>
     {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Se ejecuta una vez que jQuery y Select2 han sido cargados (en el layout.html)
+    $(document).ready(function() {
+        // Inicializa Select2 en el select con id="cliente_selector"
+        $('#cliente_selector').select2({
+            // Habilita el control de búsqueda por subcadena
+            width: '100%',
+        });
+    });
+</script>
 {% endblock %}
