@@ -20,12 +20,17 @@ app = Flask(__name__)
 #                         CONFIGURACIÓN Y GLOBALES
 # =================================================================
 
-# ** ADAPTA ESTA URL ** con las credenciales de tu ambiente de prueba MySQL.
-DB_URL_TEST = os.environ.get(
-    'DATABASE_URL', 
-    'mysql+pymysql://root:password@localhost/u822656934_claves_cliente' 
-)
-app.config['SECRET_KEY'] = 'clave_secreta_solo_para_prueba_muy_larga_y_segura' 
+# --- LECTURA DE VARIABLES DE ENTORNO ---
+DB_HOST = os.environ.get('DB_HOST', 'srv1591.hstgr.io')
+DB_NAME = os.environ.get('DB_NAME', 'u822656934_claves_cliente')
+DB_USER = os.environ.get('DB_USER', 'u822656934_estudionoya')
+DB_PASSWORD = os.environ.get('DB_PASSWORD', 'ArielNoya01')
+DB_PORT = os.environ.get('DB_PORT', '3306') 
+
+# CONSTRUCCIÓN DE LA URL DE CONEXIÓN A HOSTINGER (Render usará esta URL)
+DB_URL_TEST = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
+
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'q8mYn_7f2sCj3XR5zT0Lp2E4wK9H_0qA7dFm9oG1vJ6I8uP4yS3xW0uY1rC7eB2')
 
 # Configuración del Login Manager
 login_manager = LoginManager()
@@ -52,6 +57,7 @@ def load_user(user_id):
     cursor = None
     user = None
     try:
+        # Usamos la URL construida a partir de las variables de entorno
         db_params = pymysql.cursors.parse_connect_args(DB_URL_TEST)
         conn = pymysql.connect(cursorclass=pymysql.cursors.DictCursor, **db_params)
         cursor = conn.cursor()
@@ -279,7 +285,115 @@ def gestion_claves():
                            filtro_aplicado=filtro_aplicado,
                            usuario_actual=usuario_actual)
 
+# Esta ruta fue agregada para que el ADMIN pueda asignar permisos.
+@app.route('/asignar_clientes', methods=['GET', 'POST'])
+@login_required
+def asignar_clientes():
+    # 1. SEGURIDAD: Solo el administrador puede acceder a esta ruta
+    if not current_user.is_admin:
+        flash("Acceso denegado. Se requiere ser administrador.", 'error')
+        return redirect(url_for('gestion_claves'))
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # --- A. Procesar POST (Guardar asignaciones) ---
+        if request.method == 'POST':
+            # 1. ELIMINAR todas las relaciones existentes para el usuario
+            user_id_to_update = request.form.get('user_id')
+            if user_id_to_update:
+                cursor.execute("DELETE FROM usuario_cliente_test WHERE user_id = %s", (user_id_to_update,))
+                
+                # 2. INSERTAR las nuevas relaciones
+                clientes_asignados = request.form.getlist('clientes_asignados')
+                for cliente_id in clientes_asignados:
+                    sql_insert = """
+                        INSERT INTO usuario_cliente_test (user_id, cliente_id) 
+                        VALUES (%s, %s)
+                    """
+                    cursor.execute(sql_insert, (user_id_to_update, cliente_id))
+                
+                conn.commit()
+                flash(f'Permisos actualizados para el usuario ID {user_id_to_update} con {len(clientes_asignados)} clientes.', 'success')
+                return redirect(url_for('asignar_clientes'))
+
+        # --- B. Procesar GET (Mostrar formulario) ---
+        
+        # Obtener todos los usuarios de PRUEBA
+        cursor.execute("SELECT id, username, is_admin FROM user_test ORDER BY username")
+        users = cursor.fetchall()
+        
+        # Obtener todos los clientes (de la tabla de PRODUCCIÓN)
+        cursor.execute("SELECT id, cuit, razon_social FROM clientes_afip ORDER BY razon_social")
+        clientes = cursor.fetchall()
+        
+        # Obtener las asignaciones actuales
+        relaciones_actuales = get_user_client_relations(conn)
+        
+    except Exception as e:
+        print(f"Error en la ruta /asignar_clientes: {e}") 
+        flash('Error al cargar la interfaz de administración.', 'error')
+        users = []
+        clientes = []
+        relaciones_actuales = {}
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+            
+    return render_template('asignar_clientes.html', 
+                           users=users, 
+                           clientes=clientes, 
+                           relaciones_actuales=relaciones_actuales)
+
+# --- Función Auxiliar para Administrar Relaciones ---
+def get_user_client_relations(conn):
+    """Obtiene todas las relaciones user-cliente existentes para la interfaz de administración."""
+    cursor = conn.cursor()
+    # Usamos la tabla de relación de PRUEBA
+    sql = """
+        SELECT 
+            uct.user_id, 
+            uct.cliente_id, 
+            u.username, 
+            c.razon_social
+        FROM 
+            usuario_cliente_test uct
+        INNER JOIN 
+            user_test u ON u.id = uct.user_id
+        INNER JOIN 
+            clientes_afip c ON c.id = uct.cliente_id
+    """
+    cursor.execute(sql)
+    relations = {}
+    
+    # Estructuramos el resultado: {user_id: [cliente_id_1, cliente_id_2], ...}
+    for row in cursor.fetchall():
+        user_id = row['user_id']
+        cliente_id = row['cliente_id']
+        if user_id not in relations:
+            relations[user_id] = []
+        relations[user_id].append(cliente_id)
+        
+    cursor.close()
+    return relations
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
+
+
+### 🚨 Pasos a Seguir para el Despliegue Exitoso 🚨
+
+1.  **Añadir Variables en Render:** Asegúrate de que las siguientes variables estén definidas en la configuración de entorno de Render:
+    * `DB_HOST`: `srv1591.hstgr.io`
+    * `DB_NAME`: `u822656934_claves_cliente`
+    * `DB_USER`: `u822656934_estudionoya`
+    * `DB_PASSWORD`: `ArielNoya01`
+    * `FLASK_SECRET_KEY`: `q8mYn_7f2sCj3XR5zT0Lp2E4wK9H_0qA7dFm9oG1vJ6I8uP4yS3xW0uY1rC7eB2`
+2.  **Sustituir `app_test.py`** con el código de arriba.
+3.  **Asegurarse de tener el Template `templates/asignar_clientes.html`** (que te di en la respuesta anterior).
+4.  **Desplegar:** El primer despliegue ejecutará la inicialización automática sin problemas de conexión a MySQL.
+
