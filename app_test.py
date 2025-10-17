@@ -21,6 +21,9 @@ app = Flask(__name__)
 #                         CONFIGURACIÓN Y GLOBALES
 # =================================================================
 
+# Bandera para asegurar que la inicialización solo se ejecute una vez
+APP_INITIALIZED = False
+
 # --- LECTURA DE VARIABLES DE ENTORNO (Método de conexión estable) ---
 DB_HOST = os.environ.get('DB_HOST', 'srv1591.hstgr.io')
 DB_NAME = os.environ.get('DB_NAME', 'u822656934_claves_cliente')
@@ -95,7 +98,7 @@ def load_user(user_id):
 
 
 # =================================================================
-#            LÓGICA DE INICIALIZACIÓN AUTOMÁTICA (SQLAlchemy SOLO AQUÍ)
+#            LÓGICA DE INICIALIZACIÓN (Chequeo de Tablas)
 # =================================================================
 
 # Definición de la base y modelos minimalistas SOLO para comprobar las tablas
@@ -144,12 +147,14 @@ def ensure_db_tables_exist():
         # Se imprime el error sin lanzar la excepción para no detener Flask
         print(f"🛑 ERROR DE CONEXIÓN DURANTE EL CHEQUEO DE TABLAS: {e}")
 
-# MANTENEMOS ESTO DENTRO DE UN CONTEXTO SEGURO DE FLASK (antes de la primera solicitud)
-@app.before_first_request
-def initialize_app():
-    """Inicialización que se ejecuta una sola vez al inicio."""
-    # Esto asegura que la DB sea chequeada solo después de que el servidor esté listo
-    ensure_db_tables_exist() 
+# Mantenemos esta inicialización dentro del contexto de Flask para que sea más seguro.
+@app.before_request
+def before_request_check():
+    """Se ejecuta antes de cada solicitud. Solo inicializa la primera vez."""
+    global APP_INITIALIZED
+    if not APP_INITIALIZED:
+        ensure_db_tables_exist()
+        APP_INITIALIZED = True
 
 
 # =================================================================
