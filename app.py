@@ -190,14 +190,11 @@ def consultar_cuit_afip(cuit_consultado_str):
                 if persona is None:
                     return None, f"CUIT {cuit_consultado_str} no encontrado o sin datos."
                 
-                # DIAGNÓSTICO: Imprime la estructura completa que se recibe
+                # Si deseas ver la estructura completa para diagnóstico, descomenta las líneas
                 # print("--- DIAGNÓSTICO AFIP (Zeep) ---")
                 # print(serialize_object(persona))
                 # print("-------------------------------")
 
-                # NOTA: La captura del nombre se mueve a format_afip_result_html para manejar Personas Físicas/Jurídicas
-                
-                # En esta función solo necesitamos asegurar que la personaData no sea None
                 return persona, "Datos obtenidos (pendiente de formatear nombre en HTML)"
 
             except subprocess.CalledProcessError as e:
@@ -310,8 +307,8 @@ def load_data_from_excel():
 
 def format_afip_result_html(persona, cuit):
     """
-    Formatea la respuesta del servicio AFIP a una cadena HTML legible.
-    Maneja la diferencia entre Razon Social (Jurídica) y Nombre/Apellido (Física).
+    Formatea la respuesta del servicio AFIP a una cadena HTML legible,
+    incluyendo Domicilio, Actividades, Impuestos y Regímenes (Ret/Per).
     """
     if persona is None: return "No se recibieron datos de AFIP."
     
@@ -322,19 +319,16 @@ def format_afip_result_html(persona, cuit):
     if not dg:
         return f"<p class='text-danger'>Error: No se obtuvieron datos generales para el CUIT {cuit}.</p>"
 
-    # 🟢 CORRECCIÓN PARA PERSONAS FÍSICAS/JURÍDICAS/MONOTRIBUTO
+    # --- 1. CAPTURA DE NOMBRE/RAZÓN SOCIAL (manejo de FÍSICA/JURÍDICA) ---
     razon_social = getattr(dg, 'razonSocial', "")
     nombre = getattr(dg, 'nombre', "")
     apellido = getattr(dg, 'apellido', "")
     
     if razon_social:
-        # Persona Jurídica
         nombre_capturado = razon_social
     else:
-        # Persona Física (incluye Monotributista)
         nombre_capturado = f"{nombre} {apellido}".strip()
 
-    # Usar el CUIT como "razón social" si no se encontró nada
     if not nombre_capturado:
         nombre_capturado = f"Nombre no encontrado (CUIT: {cuit})"
         
@@ -363,20 +357,34 @@ def format_afip_result_html(persona, cuit):
 
         for act in actividades_list:
             principal = ' (Principal)' if getattr(act, 'periodo', '') else ''
-            html += f"<p>- Código {getattr(act, 'idActividad', '—')}: {getattr(act, 'descripcionActividad', '—')}{principal}</p>"
+            html += f"<p>- Cód. {getattr(act, 'idActividad', '—')}: {getattr(act, 'descripcionActividad', '—')}{principal}</p>"
     
     # --------------------------- IMPUESTOS ---------------------------
     impuestos_list = getattr(getattr(persona, 'impuestos', None), 'impuesto', [])
     
     if impuestos_list:
-        html += f"<h3>Impuestos</h3>"
+        html += f"<h3>Impuestos (Inscripciones)</h3>"
 
         if not isinstance(impuestos_list, list):
             impuestos_list = [impuestos_list]
 
         for imp in impuestos_list:
-            html += f"<p>- Código {getattr(imp, 'idImpuesto', '—')}: {getattr(imp, 'descripcionImpuesto', '—')}</p>"
+            html += f"<p>- ID {getattr(imp, 'idImpuesto', '—')}: {getattr(imp, 'descripcionImpuesto', '—')}</p>"
 
+    # --------------------------- REGIMENES (RET/PER) ---------------------------
+    regimenes_list = getattr(getattr(persona, 'regimenes', None), 'regimen', [])
+    
+    if regimenes_list:
+        html += f"<h3>Otros Regímenes (Retenciones/Percepciones)</h3>"
+
+        if not isinstance(regimenes_list, list):
+            regimenes_list = [regimenes_list]
+
+        for reg in regimenes_list:
+            # La AFIP a veces envía 'idRegimen' y a veces 'id'
+            reg_id = getattr(reg, 'idRegimen', None) or getattr(reg, 'id', '—')
+            html += f"<p>- ID {reg_id}: {getattr(reg, 'descripcionRegimen', '—')}</p>"
+            
     return html
 
 # =================================================================
@@ -404,7 +412,7 @@ def index():
             else:
                 consulta_cuit = cuit_consulta
                 
-                # --- Lógica para obtener el nombre/razón social ---
+                # --- Lógica para obtener el nombre/razón social (para flash y DB) ---
                 dg = getattr(persona_data, 'datosGenerales', None)
                 if dg:
                     razon_social_temp = getattr(dg, 'razonSocial', "")
@@ -416,7 +424,7 @@ def index():
                     elif nombre_temp or apellido_temp:
                          razon_social = f"{nombre_temp} {apellido_temp}".strip()
                     else:
-                         razon_social = None # No se encontró nombre ni razón social
+                         razon_social = None
                 else:
                     razon_social = None
 
