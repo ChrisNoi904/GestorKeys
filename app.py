@@ -351,22 +351,20 @@ def format_afip_result_html(persona, cuit):
     # =================================================================
     datos_monotributo = getattr(persona, 'datosMonotributo', None)
     
-    desc_cat = '' # Inicializamos con cadena vacía
+    desc_cat = '' 
     
     if datos_monotributo:
         # 1. Intentar obtener la descripción de la categoría directamente del nodo principal (y limpiar)
-        # Esto soluciona el caso 20230369322
         desc_cat = str(getattr(datos_monotributo, 'descripcionCategoria', '')).strip()
         
         if not desc_cat:
-            # 2. Si no está en el nodo principal, buscar en el nodo anidado (para compatibilidad)
-            # Esto soluciona casos donde la info está anidada
+            # 2. Si no está en el nodo principal, buscar en el nodo anidado
             categoria = getattr(datos_monotributo, 'categoriaMonotributo', None)
             if categoria:
                 # 3. Obtener del nodo anidado (y limpiar)
                 desc_cat = str(getattr(categoria, 'descripcionCategoriaMonotributo', '')).strip()
                 
-        # 🟢 CORRECCIÓN FINAL: Solo generar el HTML si la descripción (limpia) no está vacía
+        # Solo generar el HTML si la descripción (limpia) no está vacía
         if desc_cat:
             html += f"<h3>Datos del Monotributo</h3>"
             html += f"<p><strong>CATEGORÍA:</strong> {desc_cat}</p>"
@@ -500,6 +498,12 @@ def index():
 @app.route('/gestion_claves', methods=['GET', 'POST'])
 @app.route('/gestion_claves/<cuit>', methods=['GET', 'POST'])
 def gestion_claves(cuit=None):
+    # Se modifica para aceptar 'cuit' como parámetro de la URL (GET) o del formulario (POST)
+    if request.method == 'POST' and request.form.get('cuit'):
+        cuit = request.form.get('cuit')
+    elif request.method == 'GET' and request.args.get('cuit'):
+        cuit = request.args.get('cuit')
+    
     conn = get_db_connection()
     if not conn: 
         flash("Error crítico de conexión a la base de datos.", 'error')
@@ -510,6 +514,7 @@ def gestion_claves(cuit=None):
     
     try:
         with conn.cursor() as cursor:
+            # Seleccionar solo CUIT y Razon Social para el Select2
             cursor.execute("SELECT cuit, razon_social FROM clientes_afip ORDER BY razon_social")
             clientes = cursor.fetchall()
             
@@ -544,6 +549,7 @@ def gestion_claves(cuit=None):
                     flash("Clave eliminada.", 'success')
                 
                 conn.commit()
+                # Redirige con el CUIT para mantener la vista seleccionada
                 return redirect(url_for('gestion_claves', cuit=cuit))
 
     except Exception as e:
