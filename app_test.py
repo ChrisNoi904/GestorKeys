@@ -10,7 +10,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, render_template, request, redirect, url_for, flash
 
 # --- IMPORTACIONES SOLO PARA LA CREACIÓN INICIAL DE TABLAS (SQLAlchemy temporal) ---
-from sqlalchemy import create_engine
+# FIX CRÍTICO: Se añade Column, Integer, String, etc. a la importación
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, UniqueConstraint 
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.engine.reflection import Inspector
 # ---------------------------------------------------------------------------------
@@ -26,7 +27,7 @@ DB_HOST = os.environ.get('DB_HOST', 'srv1591.hstgr.io')
 DB_NAME = os.environ.get('DB_NAME', 'u822656934_claves_cliente')
 DB_USER = os.environ.get('DB_USER', 'u822656934_estudionoya')
 DB_PASSWORD = os.environ.get('DB_PASSWORD', 'ArielNoya01')
-DB_PORT = int(os.environ.get('DB_PORT', 3306)) # Convertimos a entero
+DB_PORT = int(os.environ.get('DB_PORT', 3306))
 
 # CONSTRUCCIÓN DE LA URL DE CONEXIÓN SOLO PARA LA LIBRERÍA SQLALCHEMY (Inicialización)
 DB_URL_TEST_SQLA = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
@@ -110,6 +111,7 @@ class ClienteTestORM(Base):
 class UsuarioClienteTestORM(Base):
     __tablename__ = 'usuario_cliente_test'
     id = Column(Integer, primary_key=True)
+    # No es necesario ForeignKey en este contexto de chequeo simple
     user_id = Column(Integer)
     cliente_id = Column(Integer)
     __table_args__ = (UniqueConstraint('user_id', 'cliente_id', name='_user_cliente_test_uc'),)
