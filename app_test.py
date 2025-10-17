@@ -147,7 +147,7 @@ def ensure_db_tables_exist():
         # Se imprime el error sin lanzar la excepción para no detener Flask
         print(f"🛑 ERROR DE CONEXIÓN DURANTE EL CHEQUEO DE TABLAS: {e}")
 
-# Mantenemos esta inicialización dentro del contexto de Flask para que sea más seguro.
+# Usamos before_request con una bandera para simular el comportamiento de before_first_request
 @app.before_request
 def before_request_check():
     """Se ejecuta antes de cada solicitud. Solo inicializa la primera vez."""
