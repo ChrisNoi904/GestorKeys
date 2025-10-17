@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <title>{% block title %}Gestor AFIP Cloud{% endblock %}</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f9; }
         .container { width: 90%; max-width: 1100px; margin: 20px auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
@@ -13,7 +16,13 @@
         .flash.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .flash.info { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
         .form-group { margin-bottom: 15px; }
-        input[type="text"], input[type="password"], select, input[type="date"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        /* Ajustamos el estilo para los inputs */
+        input[type="text"], input[type="password"], select, input[type="date"], .select2-container { 
+            width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; 
+        }
+        /* Corregimos el padding del select nativo (y Select2 lo usa para simular el control) */
+        select { padding: 10px; } 
+
         button, .btn { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; color: white; text-decoration: none; display: inline-block; }
         .btn-primary { background-color: #3f51b5; }
         .btn-success { background-color: #4CAF50; }
@@ -23,6 +32,18 @@
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
+
+        /* Ajustes específicos para que Select2 se vea bien con el estilo personalizado */
+        .select2-container .select2-selection--single {
+            height: 38px !important;
+            border: 1px solid #ccc !important;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            line-height: 18px !important; /* Ajuste para centrar texto */
+        }
+        .select2-container--default .select2-selection--single .select2-selection__arrow {
+            height: 36px !important;
+        }
     </style>
 </head>
 <body>
@@ -44,5 +65,10 @@
         {% endwith %}
         {% block content %}{% endblock %}
     </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    
+    {% block scripts %}{% endblock %}
 </body>
 </html>
