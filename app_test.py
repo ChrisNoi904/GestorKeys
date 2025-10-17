@@ -383,17 +383,3 @@ def get_user_client_relations(conn):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
-
-
-### 🚨 Pasos a Seguir para el Despliegue Exitoso 🚨
-
-1.  **Añadir Variables en Render:** Asegúrate de que las siguientes variables estén definidas en la configuración de entorno de Render:
-    * `DB_HOST`: `srv1591.hstgr.io`
-    * `DB_NAME`: `u822656934_claves_cliente`
-    * `DB_USER`: `u822656934_estudionoya`
-    * `DB_PASSWORD`: `ArielNoya01`
-    * `FLASK_SECRET_KEY`: `q8mYn_7f2sCj3XR5zT0Lp2E4wK9H_0qA7dFm9oG1vJ6I8uP4yS3xW0uY1rC7eB2`
-2.  **Sustituir `app_test.py`** con el código de arriba.
-3.  **Asegurarse de tener el Template `templates/asignar_clientes.html`** (que te di en la respuesta anterior).
-4.  **Desplegar:** El primer despliegue ejecutará la inicialización automática sin problemas de conexión a MySQL.
-
