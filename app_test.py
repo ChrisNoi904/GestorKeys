@@ -9,12 +9,11 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, render_template, request, redirect, url_for, flash
 
-# --- IMPORTACIONES PARA SQLALCHEMY Y MODELOS DE DATOS ---
-# Importamos explícitamente todos los componentes necesarios para las clases ORM.
+# --- IMPORTACIONES PARA SQLALCHEMY Y MODELOS DE DATOS (Solo para el chequeo de tablas) ---
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.engine.reflection import Inspector
-# --------------------------------------------------------
+# -----------------------------------------------------------------------------------------
 
 app = Flask(__name__)
 
@@ -29,7 +28,7 @@ DB_USER = os.environ.get('DB_USER', 'u822656934_estudionoya')
 DB_PASSWORD = os.environ.get('DB_PASSWORD', 'ArielNoya01')
 DB_PORT = int(os.environ.get('DB_PORT', 3306)) 
 
-# CONSTRUCCIÓN DE LA URL DE CONEXIÓN SOLO PARA SQLALCHEMY (Inicialización de tablas)
+# CONSTRUCCIÓN DE LA URL DE CONEXIÓN SOLO PARA SQLALCHEMY 
 DB_URL_TEST_SQLA = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
 
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'q8mYn_7f2sCj3XR5zT0Lp2E4wK9H_0qA7dFm9oG1vJ6I8uP4yS3xW0uY1rC7eB2')
@@ -65,7 +64,7 @@ def get_db_connection():
         )
     except pymysql.Error as e:
         print(f"🛑 ERROR DE CONEXIÓN A DB (get_db_connection): {e}")
-        # Relanzamos para que Flask capture el error 500 si la conexión es crítica
+        # Relanzamos la excepción para que Flask capture el error
         raise
 
 
@@ -88,12 +87,10 @@ def load_user(user_id):
             user = User(id=user_data['id'], username=user_data['username'], is_admin=is_admin_bool)
         return user
     except Exception as e:
-        # Nota: Si get_db_connection falla, la excepción se lanza desde allí
         print(f"Error al cargar usuario de prueba (load_user): {e}") 
         return None
     finally:
         if cursor: cursor.close()
-        # No cerramos 'conn' si fue levantada por 'get_db_connection' y falló antes
         if conn: conn.close()
 
 
@@ -126,7 +123,7 @@ class UsuarioClienteTestORM(Base):
 
 
 def ensure_db_tables_exist():
-    """Función que comprueba la existencia de tablas al inicio de la app."""
+    """Función que comprueba la existencia de tablas."""
     try:
         engine = create_engine(DB_URL_TEST_SQLA)
         inspector = Inspector.from_engine(engine)
@@ -144,11 +141,15 @@ def ensure_db_tables_exist():
         else:
             print("✅ Tablas de prueba (user_test, usuario_cliente_test) existen.")
     except Exception as e:
-        # Si la conexión falla aquí, el servidor morirá, pero al menos sabremos dónde fue.
-        print(f"🛑 ERROR CRÍTICO DE CONEXIÓN AL INICIO (ensure_db_tables_exist): {e}")
+        # Se imprime el error sin lanzar la excepción para no detener Flask
+        print(f"🛑 ERROR DE CONEXIÓN DURANTE EL CHEQUEO DE TABLAS: {e}")
 
-# Ejecutar la inicialización automáticamente al inicio
-ensure_db_tables_exist() 
+# MANTENEMOS ESTO DENTRO DE UN CONTEXTO SEGURO DE FLASK (antes de la primera solicitud)
+@app.before_first_request
+def initialize_app():
+    """Inicialización que se ejecuta una sola vez al inicio."""
+    # Esto asegura que la DB sea chequeada solo después de que el servidor esté listo
+    ensure_db_tables_exist() 
 
 
 # =================================================================
@@ -185,7 +186,6 @@ def login_prueba():
                     login_user(user)
                     flash(f'¡Bienvenido, {username}!', 'success')
                     next_page = request.args.get('next')
-                    # Aseguramos que solo redirija a 'gestion_claves' si no hay una página 'next' válida
                     return redirect(next_page or url_for('gestion_claves')) 
                 else:
                     flash('Credenciales inválidas. Por favor, inténtelo de nuevo.', 'error')
@@ -212,8 +212,8 @@ def logout():
 
 @app.route('/')
 def index():
-    # Redirigimos a la ruta de prueba para asegurar que el flujo funcione
-    return redirect(url_for('gestion_claves'))
+    # Redirigimos al login
+    return redirect(url_for('login_prueba'))
 
 
 @app.route('/gestion_claves')
