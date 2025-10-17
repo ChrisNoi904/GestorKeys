@@ -190,10 +190,11 @@ def consultar_cuit_afip(cuit_consultado_str):
                 if persona is None:
                     return None, f"CUIT {cuit_consultado_str} no encontrado o sin datos."
                 
-                # Si deseas ver la estructura completa para diagnóstico, descomenta las líneas
-                # print("--- DIAGNÓSTICO AFIP (Zeep) ---")
-                # print(serialize_object(persona))
-                # print("-------------------------------")
+                # Líneas de DIAGNÓSTICO AÑADIDAS
+                print("--- INICIO DIAGNÓSTICO AFIP (Zeep) ---")
+                print(serialize_object(persona))
+                print("--- FIN DIAGNÓSTICO AFIP (Zeep) ---")
+                # FIN Líneas de DIAGNÓSTICO
 
                 return persona, "Datos obtenidos (pendiente de formatear nombre en HTML)"
 
@@ -366,6 +367,7 @@ def format_afip_result_html(persona, cuit):
     # =================================================================
     
     # --------------------------- IMPUESTOS ---------------------------
+    # Nota: Los campos se buscan en el nivel principal del objeto 'persona' ya que Zeep lo aplana
     impuestos_list = getattr(getattr(persona, 'impuestos', None), 'impuesto', [])
     
     if impuestos_list:
@@ -378,6 +380,7 @@ def format_afip_result_html(persona, cuit):
             html += f"<p>- ID {getattr(imp, 'idImpuesto', '—')}: {getattr(imp, 'descripcionImpuesto', '—')}</p>"
 
     # --------------------------- ACTIVIDADES ---------------------------
+    # Nota: Los campos se buscan en el nivel principal del objeto 'persona' ya que Zeep lo aplana
     actividades_list = getattr(getattr(persona, 'actividades', None), 'actividad', [])
     
     if actividades_list:
@@ -391,6 +394,7 @@ def format_afip_result_html(persona, cuit):
             html += f"<p>- Cód. {getattr(act, 'idActividad', '—')}: {getattr(act, 'descripcionActividad', '—')}{principal}</p>"
 
     # --------------------------- REGIMENES (RET/PER) ---------------------------
+    # Nota: Los campos se buscan en el nivel principal del objeto 'persona' ya que Zeep lo aplana
     regimenes_list = getattr(getattr(persona, 'regimenes', None), 'regimen', [])
     
     if regimenes_list:
