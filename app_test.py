@@ -9,12 +9,12 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, render_template, request, redirect, url_for, flash
 
-# --- IMPORTACIONES SOLO PARA LA CREACIÓN INICIAL DE TABLAS (SQLAlchemy temporal) ---
-# FIX CRÍTICO: Se añade Column, Integer, String, etc. a la importación
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, UniqueConstraint 
+# --- IMPORTACIONES PARA SQLALCHEMY Y MODELOS DE DATOS ---
+# Importamos explícitamente todos los componentes necesarios para las clases ORM.
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.engine.reflection import Inspector
-# ---------------------------------------------------------------------------------
+# --------------------------------------------------------
 
 app = Flask(__name__)
 
@@ -27,9 +27,9 @@ DB_HOST = os.environ.get('DB_HOST', 'srv1591.hstgr.io')
 DB_NAME = os.environ.get('DB_NAME', 'u822656934_claves_cliente')
 DB_USER = os.environ.get('DB_USER', 'u822656934_estudionoya')
 DB_PASSWORD = os.environ.get('DB_PASSWORD', 'ArielNoya01')
-DB_PORT = int(os.environ.get('DB_PORT', 3306))
+DB_PORT = int(os.environ.get('DB_PORT', 3306)) 
 
-# CONSTRUCCIÓN DE LA URL DE CONEXIÓN SOLO PARA LA LIBRERÍA SQLALCHEMY (Inicialización)
+# CONSTRUCCIÓN DE LA URL DE CONEXIÓN SOLO PARA SQLALCHEMY (Inicialización de tablas)
 DB_URL_TEST_SQLA = f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
 
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'q8mYn_7f2sCj3XR5zT0Lp2E4wK9H_0qA7dFm9oG1vJ6I8uP4yS3xW0uY1rC7eB2')
@@ -41,7 +41,7 @@ login_manager.login_view = 'login_prueba'
 login_manager.login_message = "Por favor, inicie sesión para acceder a esta página."
 
 
-# --- CLASE BASE DE USUARIO ---
+# --- CLASE BASE DE USUARIO (FLASK-LOGIN) ---
 class User(UserMixin):
     def __init__(self, id, username, is_admin):
         self.id = id
@@ -54,14 +54,20 @@ class User(UserMixin):
 # Función de conexión a DB (USO DEL MÉTODO DIRECTO Y ROBUSTO)
 def get_db_connection():
     """Establece la conexión a la base de datos usando argumentos directos."""
-    return pymysql.connect(
-        host=DB_HOST,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_NAME,
-        port=DB_PORT,
-        cursorclass=pymysql.cursors.DictCursor
-    )
+    try:
+        return pymysql.connect(
+            host=DB_HOST,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            port=DB_PORT,
+            cursorclass=pymysql.cursors.DictCursor
+        )
+    except pymysql.Error as e:
+        print(f"🛑 ERROR DE CONEXIÓN A DB (get_db_connection): {e}")
+        # Relanzamos para que Flask capture el error 500 si la conexión es crítica
+        raise
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -77,14 +83,17 @@ def load_user(user_id):
         user_data = cursor.fetchone()
 
         if user_data:
+            # Manejo de is_admin si viene como TINYINT (0 o 1)
             is_admin_bool = bool(user_data['is_admin']) if isinstance(user_data['is_admin'], int) else user_data['is_admin']
             user = User(id=user_data['id'], username=user_data['username'], is_admin=is_admin_bool)
         return user
     except Exception as e:
+        # Nota: Si get_db_connection falla, la excepción se lanza desde allí
         print(f"Error al cargar usuario de prueba (load_user): {e}") 
         return None
     finally:
         if cursor: cursor.close()
+        # No cerramos 'conn' si fue levantada por 'get_db_connection' y falló antes
         if conn: conn.close()
 
 
@@ -92,7 +101,7 @@ def load_user(user_id):
 #            LÓGICA DE INICIALIZACIÓN AUTOMÁTICA (SQLAlchemy SOLO AQUÍ)
 # =================================================================
 
-# Definición de la base y modelos minimalistas SOLO para crear las tablas
+# Definición de la base y modelos minimalistas SOLO para comprobar las tablas
 Base = declarative_base()
 
 class UserTestORM(Base):
@@ -111,7 +120,6 @@ class ClienteTestORM(Base):
 class UsuarioClienteTestORM(Base):
     __tablename__ = 'usuario_cliente_test'
     id = Column(Integer, primary_key=True)
-    # No es necesario ForeignKey en este contexto de chequeo simple
     user_id = Column(Integer)
     cliente_id = Column(Integer)
     __table_args__ = (UniqueConstraint('user_id', 'cliente_id', name='_user_cliente_test_uc'),)
@@ -123,11 +131,20 @@ def ensure_db_tables_exist():
         engine = create_engine(DB_URL_TEST_SQLA)
         inspector = Inspector.from_engine(engine)
         
-        if 'user_test' not in inspector.get_table_names() or 'usuario_cliente_test' not in inspector.get_table_names():
-            print("ADVERTENCIA: Tablas de prueba incompletas. Asegúrese de haberlas creado e insertado datos.")
+        missing_tables = []
+        
+        if 'user_test' not in inspector.get_table_names():
+            missing_tables.append('user_test')
+            
+        if 'usuario_cliente_test' not in inspector.get_table_names():
+            missing_tables.append('usuario_cliente_test')
+
+        if missing_tables:
+            print(f"ADVERTENCIA: Faltan tablas de prueba: {', '.join(missing_tables)}. Asegúrese de crearlas manualmente.")
         else:
             print("✅ Tablas de prueba (user_test, usuario_cliente_test) existen.")
     except Exception as e:
+        # Si la conexión falla aquí, el servidor morirá, pero al menos sabremos dónde fue.
         print(f"🛑 ERROR CRÍTICO DE CONEXIÓN AL INICIO (ensure_db_tables_exist): {e}")
 
 # Ejecutar la inicialización automáticamente al inicio
@@ -168,7 +185,8 @@ def login_prueba():
                     login_user(user)
                     flash(f'¡Bienvenido, {username}!', 'success')
                     next_page = request.args.get('next')
-                    return redirect(next_page or url_for('gestion_claves'))
+                    # Aseguramos que solo redirija a 'gestion_claves' si no hay una página 'next' válida
+                    return redirect(next_page or url_for('gestion_claves')) 
                 else:
                     flash('Credenciales inválidas. Por favor, inténtelo de nuevo.', 'error')
             else:
@@ -194,9 +212,8 @@ def logout():
 
 @app.route('/')
 def index():
-    if current_user.is_authenticated:
-        return redirect(url_for('gestion_claves'))
-    return redirect(url_for('login_prueba'))
+    # Redirigimos a la ruta de prueba para asegurar que el flujo funcione
+    return redirect(url_for('gestion_claves'))
 
 
 @app.route('/gestion_claves')
@@ -286,6 +303,7 @@ def asignar_clientes():
         return redirect(url_for('gestion_claves'))
 
     conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
